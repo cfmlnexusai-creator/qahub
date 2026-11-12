@@ -9,7 +9,7 @@ export async function toggleModuleSharing(store, module) {
   const ok = await confirmDialog({
     title: sharing ? `Share ${module.name} with everyone?` : `Stop sharing ${module.name}?`,
     message: sharing
-      ? 'Every active team member will be able to view this module and claim its unassigned cases. Sharing does not reassign existing work or grant edit/delete access to other people’s cases.'
+      ? 'Every active team member can view this module and claim its unassigned cases. Assignees can edit and update their cases. Existing assignments cannot be taken over; deleting remains limited to the creator.'
       : 'Team-wide access and new self-assignments will stop. Existing assignees and creators keep access to their cases.',
     confirmLabel: sharing ? 'Share with everyone' : 'Stop sharing',
   });

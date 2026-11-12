@@ -7,7 +7,7 @@ import { toast, toastError } from '../components/toast.js';
 const ROLE_HELP = {
   Admin: 'Everything, incl. team edits, permanent delete, reset',
   Maintainer: 'Modules/suites, review & approve, import',
-  Contributor: 'Create cases; edit/delete own cases; read assigned cases',
+  Contributor: 'Create cases; edit assigned cases; delete own cases',
   Viewer: 'Read-only',
 };
 
@@ -47,7 +47,7 @@ export function render({ store, root, setCrumbs, profilePicker, authMode }) {
   root.append(h('div', { style: { marginBottom: '16px' } }, banner('info', [
     h('strong', null, 'Team access is enforced by the server.'),
     h('span', null, pw
-      ? 'Admins manage the shared workspace. Contributors can create cases and edit/delete only their own. They can also read assigned cases. New profiles must be linked to a Supabase Auth user by the project administrator.'
+      ? 'Admins manage the shared workspace. Contributors can create cases, edit/update assigned cases and delete only their own cases. New profiles must be linked to a Supabase Auth user by the project administrator.'
       : 'Anyone with these files or browser DevTools can switch profile or edit data. Use Git pull-request review for shared data.'),
   ])));
   if (store.data.members.some((m) => m.placeholder)) {

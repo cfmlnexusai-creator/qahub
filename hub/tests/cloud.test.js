@@ -34,8 +34,9 @@ test('server checks assignments, roles and authenticated activity actors', async
   assert.ok(state.collections.activity.every(e => [tc.id, foreign.id].includes(e.entityId)));
   await assert.rejects(executeAction(store, 'saveMember', [{ displayName: 'Attacker', role: 'Admin' }, { selfService: true }]), /Administrator/);
   await assert.rejects(executeAction(store, 'setActor', [admin.id]), /Unsupported/);
-  await assert.rejects(executeAction(store, 'bulkUpdateCases', [[tc.id, foreign.id], { completionStatus: 'Completed' }]), /you created/);
-  await assert.rejects(executeAction(store, 'updateCase', [foreign.id, { createdBy: contributor.id, title: 'Spoofed ownership' }]), /you created/);
+  await executeAction(store, 'bulkUpdateCases', [[tc.id, foreign.id], { completionStatus: 'Completed' }]);
+  await executeAction(store, 'updateCase', [foreign.id, { createdBy: contributor.id, title: 'Assigned case updated' }]);
+  assert.equal(store.get('testCases', foreign.id).createdBy, foreign.createdBy, 'Assigned edits cannot change the creator');
   await assert.rejects(executeAction(store, 'softDeleteCases', [[foreign.id]]), /you created/);
   await executeAction(store, 'bulkUpdateCases', [[tc.id], { completionStatus: 'Completed' }]);
   assert.equal(store.get('testCases', tc.id).completionStatus, 'Completed');
@@ -46,6 +47,11 @@ test('server checks assignments, roles and authenticated activity actors', async
   assert.equal(store.get('testCases', tc.id).deletedAt, null);
   await assert.rejects(executeAction(store, 'purgeCase', [tc.id, tc.caseKey]), /Administrator/);
   await assert.rejects(executeAction(store, 'bulkUpdateCases', [[tc.id], { assignedTo: admin.id }]), /Admin/);
+  store.setActor(admin.id);
+  await store.bulkUpdateCases([tc.id], { assignedTo: admin.id });
+  store.setActor(contributor.id);
+  await assert.rejects(executeAction(store, 'updateCase', [tc.id, { title: 'No longer assigned to creator' }]), /assigned to you/);
+  await assert.rejects(executeAction(store, 'bulkUpdateCases', [[tc.id, foreign.id], { priority: 'Low' }]), /assigned to you/);
   store.setActor(viewer.id);
   await assert.rejects(executeAction(store, 'bulkUpdateCases', [[], { completionStatus: 'Completed' }]), /cannot do this/);
 });

@@ -49,13 +49,13 @@ test('assigned view scopes lists, direct lookups, activity and metadata for all 
 
 test('assigned mutation wrapper rejects foreign cases and mixed bulk operations before writing', async () => {
   const { view, changed } = fixture();
-  await assert.rejects(view.updateCase('two', {}), /you created/);
-  await assert.rejects(view.bulkUpdateCases(['one', 'two'], {}), /you created/);
+  await assert.rejects(view.updateCase('three', {}), /assigned to you/);
+  await assert.rejects(view.bulkUpdateCases(['one', 'three'], {}), /assigned to you/);
   assert.equal(changed(), null);
   await view.updateCase('one', { completionStatus: 'Completed' });
   assert.equal(changed(), 'one');
-  await view.updateCase('three', {});
-  assert.equal(changed(), 'three', 'Creator retains edit access after Admin reassignment');
+  await view.updateCase('two', {});
+  assert.equal(changed(), 'two', 'Assignee can edit a case created by another member');
 });
 
 test('admins see all cases and developer report reconciles active totals including unassigned', () => {

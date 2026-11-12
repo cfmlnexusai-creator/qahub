@@ -31,7 +31,7 @@ export function render(ctx) {
   }
   if (existing && !canEditCase(store, existing)) {
     setCrumbs([{ label: 'Test Cases', href: '#/cases' }, { label: existing.caseKey }]);
-    root.append(banner('warn', 'You can edit only test cases you created. Assigned cases created by someone else are read-only.'));
+    root.append(banner('warn', 'You can edit only test cases assigned to you. Ask an Admin to assign this case, or claim it from a shared module.'));
     return;
   }
 

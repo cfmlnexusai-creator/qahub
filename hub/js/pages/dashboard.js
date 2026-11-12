@@ -89,7 +89,7 @@ export function render({ store, root, setCrumbs }) {
 
   root.append(pageHead({
     title: isAdmin(store) ? store.meta.project.name : 'My testing workspace',
-    subtitle: !isAdmin(store) ? 'Cases assigned to you or created by you. You can edit and delete only your own cases.' : `Shared test cases across ${store.data.modules.filter((m) => !m.archived).length} modules. Progress refreshes every 15 seconds.`,
+    subtitle: !isAdmin(store) ? 'Edit and update cases assigned to you. You can delete only cases you created.' : `Shared test cases across ${store.data.modules.filter((m) => !m.archived).length} modules. Progress refreshes every 15 seconds.`,
   }));
   if (!isAdmin(store) && store.data.modules.some(m => m.sharedWithTeam && !m.archived)) {
     root.append(banner('info', [h('span', null, 'Shared modules are available. Claim an unassigned case to add it to your workload.'), h('a', { href: '#/modules' }, 'Browse shared modules')]));

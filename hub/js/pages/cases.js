@@ -6,7 +6,7 @@ import {
 } from '../components/ui.js';
 import { confirmDialog, formDialog } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
-import { canEditCase, canClaimCase } from '../visibility.js';
+import { canEditCase, canDeleteCase, canClaimCase } from '../visibility.js';
 import { toggleModuleSharing } from './modules.js';
 
 const COLUMNS = [
@@ -223,20 +223,21 @@ export function render(ctx) {
     if (!selected.size) return bulkbar.replaceChildren();
     const ids = [...selected];
     const editableSelection = canBulk && ids.every(id => canEditCase(store, store.get('testCases', id)));
+    const deletableSelection = canBulk && ids.every(id => canDeleteCase(store, store.get('testCases', id)));
     bulkbar.replaceChildren(...[
       h('span', null, `${plural(ids.length, 'case')} selected`),
       h('button', { type: 'button', class: 'btn-link small', onClick: () => { visibleIds.forEach((id) => selected.add(id)); update(); } }, 'Select page'),
       h('button', { type: 'button', class: 'btn-link small', onClick: () => { filterCases(store, state.f).forEach((c) => selected.add(c.id)); update(); } }, 'Select all matching'),
       h('span', { class: 'spacer' }),
       editableSelection && h('button', { type: 'button', class: 'btn btn-sm', onClick: () => bulkEdit(ids) }, icon('edit', 15), 'Bulk edit'),
-      canBulk && !editableSelection && h('span', { class: 'muted small' }, 'Select only cases you created to edit or delete.'),
+      canBulk && !editableSelection && h('span', { class: 'muted small' }, 'Select only cases assigned to you to bulk edit.'),
       h('button', {
         type: 'button', class: 'btn btn-sm', onClick: () => {
           const rows = sortCases(store.activeCases().filter((c) => selected.has(c.id)));
           downloadFile(`qa-hub-selected-${new Date().toISOString().slice(0, 10)}.csv`, casesToCsv(rows, look), 'text/csv');
         },
       }, 'CSV'),
-      editableSelection && h('button', { type: 'button', class: 'btn btn-sm', onClick: () => bulkDelete(ids) }, icon('trash', 15), 'Move to trash'),
+      deletableSelection && h('button', { type: 'button', class: 'btn btn-sm', onClick: () => bulkDelete(ids) }, icon('trash', 15), 'Move to trash'),
       h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onClick: () => { selected.clear(); update(); } }, 'Clear'),
     ].filter(Boolean));
   }
@@ -306,8 +307,8 @@ export function render(ctx) {
       canClaimCase(store, c) && { label: 'Assign to me', icon: 'user', onClick: () => store.claimCase(c.id).then(() => toast(`${c.caseKey} assigned to you`)).catch(toastError) },
       canEdit && { label: 'Edit', icon: 'edit', onClick: () => router.go(`/cases/${c.id}/edit`) },
       store.can('case.create') && { label: 'Duplicate', icon: 'copy', onClick: () => router.go('/cases/new', { from: c.id }) },
-      canEdit && 'sep',
-      canEdit && {
+      canDeleteCase(store, c) && 'sep',
+      canDeleteCase(store, c) && {
         label: 'Move to trash', icon: 'trash', danger: true, onClick: async () => {
           const ok = await confirmDialog({ title: `Move ${c.caseKey} to trash?`, message: c.title, confirmLabel: 'Move to trash', danger: true, reason: { label: 'Reason (optional)' } });
           if (!ok) return;

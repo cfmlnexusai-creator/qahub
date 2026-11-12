@@ -11,8 +11,9 @@ export async function executeAction(store, action, args) {
   if (!isAdmin(store) && !['createCase', 'claimCase'].includes(action)) {
     const ids = ['updateCase', 'restoreCase', 'reviewCase'].includes(action) ? [args[0]] : args[0];
     if (!Array.isArray(ids)) throw Object.assign(new Error('Case IDs are required.'), { status: 400 });
-    if (!ids.every(id => store.get('testCases', id)?.createdBy === store.actor().id)) {
-      throw Object.assign(new Error('You can only change test cases you created.'), { status: 403 });
+    const deleting = ['softDeleteCases', 'restoreCase'].includes(action);
+    if (!ids.every(id => store.get('testCases', id)?.[deleting ? 'createdBy' : 'assignedTo'] === store.actor().id)) {
+      throw Object.assign(new Error(deleting ? 'You can only delete or restore test cases you created.' : 'You can only edit test cases assigned to you.'), { status: 403 });
     }
     if (action === 'reviewCase' && args[1] !== 'submit') throw Object.assign(new Error('Administrator review required.'), { status: 403 });
   }

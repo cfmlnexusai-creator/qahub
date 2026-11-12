@@ -1,6 +1,7 @@
 // Shared by the UI and authenticated Node API.
 export const isAdmin = (store) => store.actor()?.active !== false && store.actor()?.role === 'Admin';
-export const canEditCase = (store, record) => Boolean(record && store.can('case.edit') && (isAdmin(store) || record.createdBy === store.actor()?.id));
+export const canEditCase = (store, record) => Boolean(record && store.can('case.edit') && (isAdmin(store) || record.assignedTo === store.actor()?.id));
+export const canDeleteCase = (store, record) => Boolean(record && store.can('case.edit') && (isAdmin(store) || record.createdBy === store.actor()?.id));
 export const canClaimCase = (store, record) => {
   const module = record && store.get('modules', record.moduleId);
   return Boolean(record && store.can('case.claim') && !record.assignedTo && !record.deletedAt && record.status !== 'Deprecated' && module?.sharedWithTeam && !module.archived);
@@ -32,7 +33,9 @@ export function assignedStore(store) {
       if (['updateCase', 'softDeleteCases', 'bulkUpdateCases', 'reviewCase', 'restoreCase', 'purgeCase'].includes(key)) {
         return async (idOrIds, ...args) => {
           const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
-          if (!ids.every((id) => canEditCase(target, target.get('testCases', id)))) throw Object.assign(new Error('You can only change test cases you created.'), { status: 403 });
+          const deleting = ['softDeleteCases', 'restoreCase', 'purgeCase'].includes(key);
+          const allowed = deleting ? canDeleteCase : canEditCase;
+          if (!ids.every((id) => allowed(target, target.get('testCases', id)))) throw Object.assign(new Error(deleting ? 'You can only delete or restore test cases you created.' : 'You can only edit test cases assigned to you.'), { status: 403 });
           return target[key](idOrIds, ...args);
         };
       }

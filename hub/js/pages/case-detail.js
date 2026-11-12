@@ -5,7 +5,7 @@ import {
 import { timeline } from '../components/timeline.js';
 import { confirmDialog } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
-import { canEditCase, canClaimCase } from '../visibility.js';
+import { canEditCase, canDeleteCase, canClaimCase } from '../visibility.js';
 
 export function render({ store, root, params, setCrumbs, router }) {
   const c = store.get('testCases', params.id);
@@ -31,6 +31,7 @@ export function render({ store, root, params, setCrumbs, router }) {
   ]);
 
   const canEdit = canEditCase(store, c) && !c.deletedAt;
+  const canDelete = canDeleteCase(store, c);
   const canReview = store.can('case.review');
 
   const review = async (decision) => {
@@ -66,7 +67,7 @@ export function render({ store, root, params, setCrumbs, router }) {
       const button = event.currentTarget; button.disabled = true;
       try { await store.claimCase(c.id); toast(`${c.caseKey} assigned to you`); } catch (error) { toastError(error); } finally { button.disabled = false; }
     } }, icon('user', 16), 'Assign to me'),
-    c.deletedAt && canEditCase(store, c) && h('button', { type: 'button', class: 'btn btn-primary', onClick: () => store.restoreCase(c.id).then(() => toast(`${c.caseKey} restored`)).catch(toastError) }, icon('restore', 16), 'Restore'),
+    c.deletedAt && canDelete && h('button', { type: 'button', class: 'btn btn-primary', onClick: () => store.restoreCase(c.id).then(() => toast(`${c.caseKey} restored`)).catch(toastError) }, icon('restore', 16), 'Restore'),
     canEdit && !c.deletedAt && h('button', { type: 'button', class: 'btn btn-primary', onClick: async () => {
       try {
         await store.updateCase(c.id, { completionStatus: c.completionStatus === 'Completed' ? 'Pending' : 'Completed' }, { expectedVersion: c.version });
@@ -80,8 +81,8 @@ export function render({ store, root, params, setCrumbs, router }) {
     store.can('case.edit') && menu(null, [
       store.can('case.create') && { label: 'Duplicate', icon: 'copy', onClick: () => router.go('/cases/new', { from: c.id }) },
       { label: 'Copy link', icon: 'file', onClick: () => navigator.clipboard?.writeText(location.href).then(() => toast('Link copied')).catch(() => toast('Copy failed — use the address bar', { type: 'error' })) },
-      canEdit && 'sep',
-      canEdit && { label: 'Move to trash', icon: 'trash', danger: true, onClick: del },
+      canDelete && !c.deletedAt && 'sep',
+      canDelete && !c.deletedAt && { label: 'Move to trash', icon: 'trash', danger: true, onClick: del },
     ], { label: 'More actions' }),
   );
 
@@ -110,16 +111,16 @@ export function render({ store, root, params, setCrumbs, router }) {
     : h('p', { class: 'muted' }, 'No steps documented.');
 
   const main = h('div', { class: 'stack' },
-    card({ body: h('div', { class: 'stack' }, text('Objective', c.objective), text('Description', c.description), text('Preconditions', c.preconditions)) }),
+    collapsible('Objective', h('div', { class: 'stack' }, text('Objective', c.objective), text('Description', c.description), text('Preconditions', c.preconditions))),
     card({ title: `Steps (${c.steps.length})`, body: steps }),
-    (c.expectedResult || c.testDataNotes) && card({ body: h('div', { class: 'stack' }, text('Overall expected result', c.expectedResult), text('Test data notes (synthetic only)', c.testDataNotes)) }),
-    card({ title: 'History', flush: true, body: timeline(store, store.data.activity.filter((e) => e.entityId === c.id).sort((a, b) => b.timestamp.localeCompare(a.timestamp)), { showEntity: false }) }),
+    (c.expectedResult || c.testDataNotes) && collapsible('Overall expected result', h('div', { class: 'stack' }, text('Overall expected result', c.expectedResult), text('Test data notes (synthetic only)', c.testDataNotes))),
+    collapsible('History', timeline(store, store.data.activity.filter((e) => e.entityId === c.id).sort((a, b) => b.timestamp.localeCompare(a.timestamp)), { showEntity: false }), true),
   );
 
   const dl = (rows) => h('dl', { class: 'detail-meta' }, rows.filter(Boolean).flatMap(([k, v]) => [h('dt', null, k), h('dd', null, v)]));
   const dash = h('span', { class: 'muted' }, '—');
   const side = h('div', { class: 'stack' },
-    card({ title: 'Details', body: dl([
+    collapsible('Details', dl([
       ['Module', mod ? h('a', { href: `#/cases?module=${mod.id}` }, mod.name) : 'Unknown'],
       ['Feature', feat ? feat.name : dash.cloneNode(true)],
       ['Priority', priorityChip(c.priority)],
@@ -134,15 +135,23 @@ export function render({ store, root, params, setCrumbs, router }) {
       c.risk && ['Risk', c.risk],
       c.requirementRef && ['Requirement', c.requirementRef],
       c.bugRefs.length && ['Bugs', c.bugRefs.join(', ')],
-    ]) }),
-    card({ title: 'Ownership', body: dl([
+    ])),
+    collapsible('Ownership', dl([
       ['Assignee', person(store.get('members', c.assignedTo))],
       ['Created', h('span', null, person(store.get('members', c.createdBy), { fallback: 'Unknown' }), h('div', { class: 'muted small' }, fmtDate(c.createdAt)))],
       ['Updated', h('span', null, person(store.get('members', c.updatedBy), { fallback: 'Unknown' }), h('div', { class: 'muted small' }, fmtDate(c.updatedAt)))],
       ['Reviewed', c.reviewedBy ? h('span', null, person(store.get('members', c.reviewedBy)), h('div', { class: 'muted small' }, fmtDate(c.reviewedAt))) : dash.cloneNode(true)],
       ['Version', String(c.version)],
       ['ID', h('code', { class: 'small', style: { overflowWrap: 'anywhere' } }, c.id)],
-    ]) }),
+    ])),
   );
   root.append(h('div', { class: 'split' }, main, side));
+}
+
+function collapsible(title, body, flush = false) {
+  return h('details', { class: 'card case-section', dataset: { section: title } },
+    h('summary', null, h('span', { class: 'case-section-title' }, title),
+      h('span', { class: 'case-section-show', 'aria-hidden': 'true' }, 'Show'),
+      h('span', { class: 'case-section-hide', 'aria-hidden': 'true' }, 'Hide')),
+    h('div', { class: ['card-body', flush && 'flush'] }, body));
 }

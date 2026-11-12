@@ -33,11 +33,11 @@ test('only Admins share a module; all members see its current/future cases witho
     assert.equal(scoped.get('testCases', tc.id).id, tc.id);
     assert.equal(scoped.get('testCases', later.id).id, later.id);
     assert.equal(canEditCase(scoped, tc), false);
-    await assert.rejects(executeAction(store, 'updateCase', [tc.id, { title: 'Not the creator' }]), /you created/);
+    await assert.rejects(executeAction(store, 'updateCase', [tc.id, { title: 'Not assigned' }]), /assigned to you/);
     assert.equal(canClaimCase(scoped, scoped.get('testCases', tc.id)), member.role !== 'Viewer');
   }
 });
-test('self-assignment uses the authenticated actor, never steals assigned work, and keeps creator-only editing', async () => {
+test('self-assignment grants assigned edits, never steals assigned work, and keeps deletion creator-only', async () => {
   const { store, admin, contributors, tc, module } = await fixture();
   await executeAction(store, 'setModuleShared', [module.id, true]);
   store.setActor(contributors[0].id);
@@ -47,6 +47,8 @@ test('self-assignment uses the authenticated actor, never steals assigned work, 
   assert.equal(claimed.version, tc.version + 1);
   assert.equal(store.data.activity.at(-1).actorId, contributors[0].id);
   assert.match(store.data.activity.at(-1).note, /Self-assigned/);
+  await executeAction(store, 'updateCase', [tc.id, { title: 'Claimed case edited by assignee', completionStatus: 'Completed' }]);
+  assert.equal(store.get('testCases', tc.id).completionStatus, 'Completed');
   await assert.rejects(executeAction(store, 'softDeleteCases', [[tc.id]]), /you created/);
   store.setActor(contributors[1].id);
   await assert.rejects(executeAction(store, 'claimCase', [tc.id]), /already assigned/);

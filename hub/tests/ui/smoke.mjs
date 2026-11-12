@@ -173,6 +173,16 @@ async function main() {
   step = 'save completion';
   await go('#/cases/' + tc.id);
   await waitFor(`document.querySelector('.steps-view')`);
+  step = 'case detail starts with Steps visible and optional sections collapsed';
+  assert.equal(await evaluate(`[...document.querySelectorAll('details.case-section')].every(d => !d.open)`), true);
+  assert.equal(await evaluate(`document.querySelector('.steps-view').offsetParent !== null`), true);
+  for (const section of ['Objective', 'Overall expected result', 'History']) {
+    await click(`details[data-section="${section}"] summary`);
+    assert.equal(await evaluate(`document.querySelector('details[data-section="${section}"]').open`), true);
+    assert.equal(await evaluate(`document.querySelector('.steps-view').offsetParent !== null`), true);
+    await click(`details[data-section="${section}"] summary`);
+  }
+  step = 'save completion';
   pauseNextRefresh = true;
   await evaluate('window.qaHub.store.reload(); true');
   for (let i = 0; i < 100 && !releaseRefresh; i++) await sleep(10);
@@ -224,14 +234,22 @@ async function main() {
   await clickText('main button', 'Assign to me');
   await waitFor(`window.qaHub.store.get('testCases','${sharedCase.id}').assignedTo === 'mbr-sujitha'`);
   assert.equal(backend.get('testCases', sharedCase.id).assignedTo, 'mbr-sujitha');
-  assert.equal(await evaluate(`!!document.querySelector('main a[href$="/edit"]')`), false, 'Claim does not grant creator-only edit rights');
-  step = 'Contributor assigned case is read-only';
+  assert.equal(await evaluate(`!!document.querySelector('main a[href$="/edit"]')`), true, 'Claim grants assigned edit rights');
+  step = 'Contributor edits an assigned Admin-created case';
   await go('#/cases/' + tc.id);
   await waitFor(`document.querySelector('.steps-view')`);
-  assert.equal(await evaluate(`!!document.querySelector('main a[href$="/edit"]')`), false);
-  assert.equal(await evaluate(`[...document.querySelectorAll('main button')].some(b => b.textContent.includes('Mark completed') || b.textContent.includes('Reopen case'))`), false);
+  assert.equal(await evaluate(`!!document.querySelector('main a[href$="/edit"]')`), true);
+  assert.equal(await evaluate(`[...document.querySelectorAll('main button')].some(b => b.textContent.includes('Mark completed') || b.textContent.includes('Reopen case'))`), true);
   await go('#/cases/' + tc.id + '/edit');
-  await waitFor(`document.querySelector('main').textContent.includes('only test cases you created')`);
+  await waitFor(`document.querySelector('input[name=title]')`);
+  await setValue('input[name=title]', 'Admin-created case edited by assigned Contributor');
+  await click('form .editor-actions button[type=submit]');
+  await waitFor(`location.hash === '#/cases/${tc.id}' && document.querySelector('.steps-view')`);
+  assert.equal(backend.get('testCases', tc.id).title, 'Admin-created case edited by assigned Contributor');
+  assert.equal(backend.get('testCases', tc.id).createdBy, tc.createdBy);
+  await click('[aria-label="More actions"]');
+  assert.equal(await evaluate(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Move to trash'))`), false);
+  await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}))`);
   step = 'Contributor creates own case';
   await go('#/cases/new');
   await fillCase({ title: 'Contributor-owned navigation test', moduleId: navigation.modules[0].id, featureId: navigation.features[0].id, objective: 'Check a visible patient page.', steps: [['Open the synthetic page', 'The expected section is visible']] });
@@ -258,7 +276,7 @@ async function main() {
   await waitFor(`document.querySelector('main').textContent.includes('Contributor-owned navigation test updated')`);
   assert.equal(await evaluate(`document.querySelector('main').textContent.includes('Delete forever')`), false);
   assert.deepEqual(errors, []);
-  console.log('Cloud UI smoke passed: 3915 cases, Admin shares module, Contributor views/claims shared case, creator-only management, sync/save and mobile.');
+  console.log('Cloud UI smoke passed: collapsible details with Steps always visible, assigned Contributor editing, creator-only deletion, module sharing, sync/save and mobile.');
 }
 main()
   .catch((e) => { console.error(`FAILED at step "${step}":`, e.message); if (errors.length) console.error(errors.join('\n')); process.exitCode = 1; })

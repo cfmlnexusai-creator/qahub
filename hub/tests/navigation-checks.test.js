@@ -40,6 +40,6 @@ test('a Contributor with no assigned cases can create in the navigation module a
   assert.equal(store.get('testCases', own.id).version, 2);
   await executeAction(store, 'softDeleteCases', [[own.id], 'Own case only']);
   assert.ok(store.get('testCases', own.id).deletedAt);
-  await assert.rejects(executeAction(store, 'updateCase', [template.id, { title: 'Attempt to edit Admin-created case' }]), /you created/);
+  await assert.rejects(executeAction(store, 'updateCase', [template.id, { title: 'Attempt to edit unassigned case' }]), /assigned to you/);
   await assert.rejects(executeAction(store, 'softDeleteCases', [[template.id]]), /you created/);
 });
