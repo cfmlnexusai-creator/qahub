@@ -1,3 +1,4 @@
+import apiHandler from '../api/index.js';
 // Zero-dependency static server for local development: `npm start` or `node scripts/serve.js [port]`.
 // ES modules need http(s); opening index.html via file:// will not work.
 
@@ -27,7 +28,10 @@ createServer(async (req, res) => {
   if (!enforceIpAllowlist(req, res, { allowLoopback: host === '127.0.0.1' || host === '::1' })) return;
   try {
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname.startsWith('/api/')) { await apiHandler(req, res); return; }
+    if (url.pathname !== '/' && !/^\/(index\.html|(?:js|css)\/[^\\]+)$/.test(url.pathname)) { res.writeHead(404).end('Not found'); return; }
     let path = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/, '');
+    if (path && path !== 'index.html' && !/^(js|css)[/\\]/.test(path)) { res.writeHead(404).end('Not found'); return; }
     let file = resolve(join(root, path));
     if (file !== root && !file.startsWith(root + sep)) { res.writeHead(403).end('Forbidden'); return; }
     if ((await stat(file).catch(() => null))?.isDirectory()) file = join(file, 'index.html');

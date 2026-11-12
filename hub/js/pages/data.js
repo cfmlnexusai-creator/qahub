@@ -20,7 +20,7 @@ export function render({ store, root, setCrumbs, query }) {
   const look = lookups(store);
   const canImport = store.can('data.import');
 
-  root.append(pageHead({ title: 'Import / Export', subtitle: 'JSON is the portable format for backups and for sharing through Git. Nothing leaves this browser until you export it.' }));
+  root.append(pageHead({ title: 'Import / Export', subtitle: 'Export JSON backups or import reviewed data into the shared team workspace. Imports affect everyone.' }));
 
   // ---- export ----
   const unexported = store.hasUnexportedChanges();
@@ -112,17 +112,17 @@ export function render({ store, root, setCrumbs, query }) {
       h('label', { class: 'check' }, h('input', { type: 'radio', name: 'mode', value: 'merge', checked: true, onChange: () => { mode = 'merge'; tableCard.hidden = false; } }),
         h('span', null, h('strong', null, 'Merge (recommended)'), h('span', { class: 'muted' }, ' — add new records, update when the file is newer, keep local when local is newer. Conflicts are kept local unless you tick them.'))),
       store.can('data.reset') && h('label', { class: 'check' }, h('input', { type: 'radio', name: 'mode', value: 'replace', onChange: () => { mode = 'replace'; tableCard.hidden = true; } }),
-        h('span', null, h('strong', null, 'Replace all local data'), h('span', { class: 'muted' }, ' — restore a backup or start from the team file. Local-only records are removed.'))));
+        h('span', null, h('strong', null, 'Replace all shared data'), h('span', { class: 'muted' }, ' — restore a backup or start from the team file. Existing shared records missing from the file are removed.'))));
 
     const tableCard = h('div', { class: 'table-wrap', style: { maxHeight: '420px', border: '1px solid var(--border)', borderRadius: 'var(--radius)' } },
       changes.length ? h('table', { class: 'table import-table' },
         h('thead', null, h('tr', null, ['Apply', 'Type', 'Record', 'Change', 'Fields', 'Version'].map((t) => h('th', { scope: 'col' }, t)))),
-        tbody) : emptyState({ iconName: 'check', title: 'Everything in this file already matches local data', text: plan.newActivity.length ? `${plural(plan.newActivity.length, 'history event')} will still be added.` : '' }));
+        tbody) : emptyState({ iconName: 'check', title: 'Everything in this file already matches shared data', text: plan.newActivity.length ? `${plural(plan.newActivity.length, 'history event')} will still be added.` : '' }));
 
     const apply = async () => {
       if (!canImport) return toast('Your role cannot import. Ask a Maintainer or Admin.', { type: 'error' });
       const ok = await confirmDialog(mode === 'replace'
-        ? { title: 'Replace all local data?', message: `Every local record will be replaced with the contents of ${name} (${plural(doc.testCases?.length || 0, 'case')}).`, confirmLabel: 'Replace local data', danger: true, typed: 'REPLACE' }
+        ? { title: 'Replace all shared data?', message: `Every shared record will be replaced with the contents of ${name} (${plural(doc.testCases?.length || 0, 'case')}).`, confirmLabel: 'Replace shared data', danger: true, typed: 'REPLACE' }
         : { title: 'Apply merge?', message: `${plural(changes.filter((c) => c.take).length, 'change')} will be applied from ${name}${plan.newActivity.length ? `, plus ${plural(plan.newActivity.length, 'history event')}` : ''}.`, confirmLabel: 'Apply merge' });
       if (!ok) return;
       try {
@@ -130,7 +130,7 @@ export function render({ store, root, setCrumbs, query }) {
         const result = await store.applyImport(plan, { mode, sourceName: name, incoming: doc });
         // The page re-renders after the store changes, so report the outcome in a toast.
         toast(result.replaced
-          ? `Replaced local data with ${name}: ${plural(result.cases, 'case')}.`
+          ? `Replaced shared data with ${name}: ${plural(result.cases, 'case')}.`
           : `Merged ${name}: ${result.added} added, ${result.updated} updated, ${result.deleted} removed, ${result.rekeyed} re-keyed, ${result.skipped} skipped, ${result.activity} history events.`, { timeout: 10000 });
       } catch (e) { toastError(e); }
     };
@@ -141,11 +141,11 @@ export function render({ store, root, setCrumbs, query }) {
       h('div', { class: 'chips' }, counts, plan.newActivity.length ? h('span', { class: 'chip plain chip-outline' }, `New history events: ${plan.newActivity.length}`) : null),
       modeRadios,
       tableCard,
-      h('label', { class: 'check small' }, backupCb, 'Download a backup of current local data first'),
+      h('label', { class: 'check small' }, backupCb, 'Download a backup of current shared data first'),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'btn btn-primary', disabled: !canImport, onClick: apply }, 'Apply import'),
         h('button', { type: 'button', class: 'btn btn-ghost', onClick: () => preview.replaceChildren() }, 'Cancel')),
-      !canImport ? banner('warn', 'Your role cannot apply imports. Ask a Maintainer or Admin, or switch profile.') : null,
+      !canImport ? banner('warn', 'Your role cannot apply imports. Ask an Admin.') : null,
     ].filter(Boolean));
     preview.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
@@ -153,18 +153,11 @@ export function render({ store, root, setCrumbs, query }) {
   const importCard = card({ title: 'Import', body: h('div', { class: 'stack' }, fileInput, drop, preview) });
 
   const gitCard = card({
-    title: 'Team workflow with Git',
-    body: h('div', { class: 'stack', style: { gap: '10px' } },
-      h('p', { class: 'muted' }, 'QA Hub has no server. Sharing happens through reviewed JSON files in Git, never automatically.'),
-      h('ol', { style: { margin: 0, paddingLeft: '20px', display: 'grid', gap: '6px' } },
-        h('li', null, 'Pull the latest ', h('code', null, 'main'), ' of the qa-hub repository.'),
-        h('li', null, 'Import the module files you will work on from ', h('code', null, 'data/modules/'), ' (Merge).'),
-        h('li', null, 'Edit cases under your own profile.'),
-        h('li', null, 'Export the changed modules (per-module JSON) and overwrite the files in ', h('code', null, 'data/modules/'), '.'),
-        h('li', null, 'Commit on a feature branch and open a pull request. Review the JSON diff for duplicate IDs/keys and PHI.'),
-        h('li', null, 'After merge, teammates pull and import the updated files.')),
-      banner('info', 'Prefer one file per module to keep merge conflicts small. If two people edit the same case, the import preview flags it as a conflict instead of silently overwriting.'),
-      banner('warn', 'Never commit real patient data, credentials, browser storage dumps or secrets.')),
+    title: 'Shared team workflow',
+    body: h('div', { class: 'stack' },
+      h('p', null, 'Saved changes are shared automatically. Teammates see updates within 15 seconds or when returning to the window.'),
+      h('p', null, 'Export JSON for backups. Review imports before applying changes, especially Replace, which affects the whole team.'),
+      banner('warn', 'Use synthetic test data only. Keep credentials and patient data out of cases and exports.')),
   });
 
   root.append(h('div', { class: 'grid grid-2', style: { alignItems: 'start' } }, h('div', { class: 'stack' }, exportCard, gitCard), importCard));

@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.*
+!.env.example
+hub/data/users.local.json
+hub/dist/
+.vercel/
+.local/

@@ -20,8 +20,8 @@ export function render({ store, root, setCrumbs }) {
     const ok = await confirmDialog({
       title: `Permanently delete ${c.caseKey}?`,
       message: h('div', { class: 'stack', style: { gap: '8px' } },
-        h('p', null, `“${c.title}” will be removed from this browser. Its key ${c.caseKey} will never be reused and its activity history is kept.`),
-        banner('warn', [h('span', null, 'Admin-only is a UI convenience — it does not enforce security. Copies in exported JSON files, Git history or other browsers still exist until they are re-exported and merged.')])),
+        h('p', null, `“${c.title}” will be removed from the shared workspace. Its key ${c.caseKey} will never be reused and its activity history is kept.`),
+        banner('warn', [h('span', null, 'This Admin action affects the whole team. Copies in previously downloaded backups remain.')])),
       confirmLabel: 'Delete permanently', danger: true, typed: c.caseKey,
     });
     if (!ok) return;

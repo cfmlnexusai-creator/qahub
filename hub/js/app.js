@@ -1,3 +1,4 @@
+import { cloudSession, cloudLogin, cloudSignOut, createCloudStore, emptyLoginStore } from './cloud.js';
 // Bootstrap: storage, store, app shell, profile gate, router, shortcuts, cross-tab sync.
 
 import { createIndexedDbPersistence, createMemoryPersistence } from './db.js';
@@ -188,7 +189,7 @@ function renderChrome() {
   shell.themeBtn.replaceChildren(icon(dark ? 'sun' : 'moon'));
   shell.themeBtn.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
   shell.userBtn.replaceChildren(...(me
-    ? [avatar(me), h('span', { class: 'hide-sm' }, h('div', { style: { fontWeight: 600, fontSize: '13px', lineHeight: 1.2 } }, me.displayName), h('div', { class: 'role' }, `${me.role} · ${credentials ? 'signed in locally' : 'not authenticated'}`))]
+    ? [avatar(me), h('span', { class: 'hide-sm' }, h('div', { style: { fontWeight: 600, fontSize: '13px', lineHeight: 1.2 } }, me.displayName), h('div', { class: 'role' }, `${me.role} · ${credentials ? 'connected to Supabase' : 'not authenticated'}`))]
     : [icon('user'), 'Choose profile']));
   shell.userBtn.setAttribute('aria-label', me ? `${credentials ? 'Signed in as' : 'Active profile'} ${me.displayName}, ${me.role}. ${credentials ? 'Account menu' : 'Switch profile'}` : 'Choose profile');
   shell.storage.replaceChildren(...(storageWarning ? [h('div', { style: { padding: '12px 24px 0' } }, banner('danger', storageWarning))] : []));
@@ -297,6 +298,7 @@ async function signIn(persistence) {
 async function signOut() {
   if (!(await leaveGuard())) return;
   clearSession();
+  cloudSignOut();
   prefs.set('activeProfile', null);
   location.hash = '#/dashboard';
   location.reload();
@@ -304,16 +306,15 @@ async function signOut() {
 
 async function accountDialog() {
   const me = store.actor();
-  const session = readSession();
+  const session = cloudSession();
   const choice = await openModal({
     title: me.displayName,
     description: `${me.role} · @${session?.username || me.memberId}`,
     body: h('div', { class: 'stack' },
       h('dl', { class: 'kv' },
         h('dt', null, 'Member ID'), h('dd', null, h('code', null, me.id)),
-        h('dt', null, 'Signed in'), h('dd', null, session?.at ? fmtRelative(new Date(session.at).toISOString()) : '—'),
-        h('dt', null, 'Session'), h('dd', null, session?.until ? 'Remembered on this browser for 12 hours' : 'Ends when this tab closes')),
-      banner('info', [h('strong', null, 'Local sign-in only.'), h('span', null, 'There is no server: this login keeps honest teammates on their own name in the activity log. It does not protect the data.')])),
+        h('dt', null, 'Session expires'), h('dd', null, session?.expiresAt ? new Date(session.expiresAt).toLocaleString() : '—')),
+      banner('info', [h('strong', null, 'Connected to Supabase.'), h('span', null, 'Your identity and permissions are checked by the server. Saved work is shared with your team.')])),
     actions: [{ label: 'Close', value: null }, { label: 'Sign out', variant: 'primary', value: 'logout' }],
   });
   if (choice === 'logout') signOut();
@@ -426,58 +427,33 @@ function showShortcuts() {
 
 // ---- boot -------------------------------------------------------------------------------
 async function boot() {
-  let persistence;
-  try {
-    persistence = await createIndexedDbPersistence();
-  } catch (e) {
-    console.error(e);
-    persistence = createMemoryPersistence();
-    storageWarning = [h('strong', null, 'Browser storage is unavailable — changes will be lost on reload.'),
-      h('span', null, `${e.message} Export JSON before closing this tab (private browsing can cause this).`)];
-  }
-  store = createStore(persistence);
-  try {
-    await store.init({
-      seedSource: async () => {
-        const res = await fetch(LIBRARY_URL, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`${LIBRARY_URL}: HTTP ${res.status}`);
-        return res.json();
+  if (!cloudSession()) {
+    appEl.classList.add('login-mode');
+    renderLogin(appEl, {
+      store: await emptyLoginStore(), cloud: true, lockoutRemaining: () => 0,
+      async submit(values) {
+        await cloudLogin(values);
+        location.reload();
+        return { ok: true };
       },
     });
-  } catch (e) {
-    clear(appEl).append(h('div', { class: 'content' }, banner('danger', [h('strong', null, 'QA Hub could not load its data.'), h('span', null, e.message)])));
     return;
   }
-  window.qaHub = { store }; // handy for debugging in DevTools
-
-  let pendingLibraryUpdate = null;
   try {
-    const upd = await checkLibraryUpdate(persistence);
-    if (typeof upd === 'function') pendingLibraryUpdate = upd;
-    else if (upd === 'auto') setTimeout(() => toast('Loaded the updated test library.'), 400);
-  } catch (e) { console.error(e); }
-
-  credentials = await loadCredentials();
-  if (!credentials) {
-    clearSession();
-    renderLogin(appEl, {
-      store,
-      configurationError: 'Sign-in is unavailable because the account configuration could not be loaded. Contact the administrator. GitHub Pages does not include the local credentials file or run the Node access restrictions.',
-    });
+    store = await createCloudStore();
+  } catch (error) {
+    clear(appEl).append(h('div', { class: 'content' }, banner('danger', [
+      h('strong', null, 'QA Hub could not load shared data.'), h('span', null, error.message),
+      h('button', { class: 'btn', onClick: () => { cloudSignOut(); location.reload(); } }, 'Return to sign in'),
+    ])));
     return;
   }
-  if (credentials) {
-    const session = readSession();
-    const valid = session && store.get('members', session.memberId)?.active !== false
-      && credentials.users.some((u) => u.memberId === session.memberId);
-    if (!valid) {
-      clearSession();
-      const res = await signIn(persistence);
-      store.setActor(res.memberId);
-      try { await store.logProfileSwitch(null, res.memberId); } catch (e) { console.error(e); }
-    } else store.setActor(session.memberId);
-    prefs.set('activeProfile', store.actor().id);
-  }
+  credentials = { users: [] };
+  const persistence = { kind: 'supabase' };
+  const pendingLibraryUpdate = null;
+  window.qaHub = { store };
+  setInterval(() => { if (!document.hidden) store.reload().catch(toastError); }, 15000);
+  window.addEventListener('focus', () => store.reload().catch(toastError));
 
   buildShell();
   router = createRouter(ROUTES, (current) => renderPage(current));
@@ -488,7 +464,7 @@ async function boot() {
   store.subscribe((change) => {
     if (change.type === 'actor') return;
     if (change.type === 'change' || change.type === 'reload' || change.type === 'export') {
-      if (change.type !== 'export') channel?.postMessage({ type: 'changed', at: Date.now() });
+      if (change.type === 'change') channel?.postMessage({ type: 'changed', at: Date.now() });
       if (router.current) {
         // Pages with live editors (editor) handle changes themselves.
         if (currentPage?.keepAliveOnChange) renderChrome();

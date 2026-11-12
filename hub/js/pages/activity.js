@@ -10,10 +10,10 @@ export function render({ store, root, setCrumbs, query, router }) {
   const f = { actor: query.actor || '', action: query.action || '', module: query.module || '', type: query.type || '', from: query.from || '', to: query.to || '' };
   let limit = PAGE;
 
-  root.append(pageHead({ title: 'Activity log', subtitle: 'Local history of creates, edits, reviews, deletions, imports and profile switches.' }));
+  root.append(pageHead({ title: 'Activity log', subtitle: 'Shared history of creates, edits, reviews, deletions and imports.' }));
   root.append(h('div', { style: { marginBottom: '16px' } }, banner('info', [
     h('strong', null, 'This is an activity log, not a tamper-proof audit trail.'),
-    h('span', null, 'Profiles are not authenticated and anyone with access to browser storage or the JSON files can alter entries. Git commit and pull-request history adds reviewable provenance for shared data.'),
+    h('span', null, 'Normal edits record the authenticated member and server time. Admin imports may replace history, so this is not an immutable compliance audit log.'),
   ])));
 
   const sel = (key, label, options) => {

@@ -22,10 +22,10 @@ function stats(store) {
  * @param {{store, submit:(v)=>Promise<{ok:boolean, reason?:string}>, lockoutRemaining:()=>number,
  *          staleData?:boolean, loadLibrary?:()=>Promise<void>}} opts
  */
-export function renderLogin(root, { store, submit, lockoutRemaining, staleData = false, loadLibrary, configurationError = '' }) {
+export function renderLogin(root, { store, submit, lockoutRemaining, staleData = false, loadLibrary, configurationError = '', cloud = false }) {
   clear(root);
 
-  const userIn = h('input', { id: 'login-user', name: 'username', type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', required: true, placeholder: 'username' });
+  const userIn = h('input', { id: 'login-user', name: 'username', type: 'text', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', required: true, placeholder: cloud ? 'you@company.com' : 'username' });
   const passIn = h('input', { id: 'login-pass', name: 'password', type: 'password', autocomplete: 'current-password', required: true, placeholder: 'Your password' });
   const reveal = h('button', { type: 'button', class: 'login-reveal', 'aria-label': 'Show password', 'aria-pressed': 'false' }, icon('eye', 16));
   reveal.addEventListener('click', () => {
@@ -49,13 +49,13 @@ export function renderLogin(root, { store, submit, lockoutRemaining, staleData =
 
   const form = h('form', { class: 'login-form', novalidate: true },
     h('div', { class: 'login-field' },
-      h('label', { for: 'login-user' }, 'Username'),
+      h('label', { for: 'login-user' }, cloud ? 'Email' : 'Username'),
       h('div', { class: 'login-input' }, icon('user', 16), userIn)),
     h('div', { class: 'login-field' },
       h('label', { for: 'login-pass' }, 'Password'),
       h('div', { class: 'login-input' }, icon('lock', 16), passIn, reveal),
       caps),
-    h('label', { class: 'login-remember', for: 'login-remember' }, remember, h('span', null, 'Keep me signed in on this browser for 12 hours')),
+    h('label', { class: 'login-remember', for: 'login-remember' }, remember, h('span', null, cloud ? 'Keep me signed in until this session expires' : 'Keep me signed in on this browser for 12 hours')),
     error,
     submitBtn);
 
@@ -119,17 +119,17 @@ export function renderLogin(root, { store, submit, lockoutRemaining, staleData =
         h('p', { class: 'login-sub' }, store.meta.project.name, ' — test library, review workflow and activity history, all local-first.'),
         h('div', { class: 'login-stats' }, stats(store).map(([n, l]) => h('div', null, h('strong', null, n), h('span', null, l)))),
         h('pre', { class: 'login-code' },
-          h('span', { class: 'c' }, '# shared through Git, no backend'), '\n',
-          h('span', { class: 'p' }, '$ '), 'git pull && npm start', '\n',
-          h('span', { class: 'p' }, '$ '), 'npm test', '  ', h('span', { class: 'ok' }, '✔ pass'), '\n',
-          h('span', { class: 'p' }, '$ '), 'open ', h('span', { class: 's' }, 'http://127.0.0.1:5173/')),
+          h('span', { class: 'c' }, cloud ? '# Node.js + Supabase + Vercel' : '# shared through Git, no backend'), '\n',
+          h('span', { class: 'p' }, '$ '), cloud ? 'Sign in with your team email' : 'git pull && npm start', '\n',
+          h('span', { class: 'p' }, '$ '), cloud ? 'Update your assigned cases' : 'npm test', '  ', h('span', { class: 'ok' }, '✔ pass'), '\n',
+          h('span', { class: 'p' }, '$ '), 'open ', h('span', { class: 's' }, cloud ? 'Shared progress dashboard' : 'http://127.0.0.1:5173/')),
         h('div', { class: 'login-foot' }, `© ${year} · Plain HTML, CSS & JS`))),
     h('section', { class: 'login-panel' },
       h('div', { class: 'login-card' },
         h('div', { class: 'login-card-head' },
           h('span', { class: 'login-badge' }, icon('lock', 14), 'Team sign-in'),
           h('h1', null, 'Welcome back'),
-          h('p', null, 'Sign in with your QA Hub username.')),
+          h('p', null, cloud ? 'Sign in with your team email and Supabase password.' : 'Sign in with your QA Hub username.')),
         stale,
         form,
         h('p', { class: 'login-note' }, icon('info', 13),

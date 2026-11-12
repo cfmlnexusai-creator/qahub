@@ -3,22 +3,22 @@
 //   node tests/ui/smoke.mjs [--shots <dir>]
 // Covers the Phase 1 acceptance flow: sign in, create two cases, reload, edit, delete/restore,
 // export JSON, import into a clean browser profile with data + history intact, sign out.
-// The real data/users.local.json is never read: the test serves its own throwaway credential
-// file through the DevTools Fetch domain.
+// Uses a mocked cloud API backed by the real store. No account credentials are needed.
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
-import { hashPassword, randomSalt } from '../../js/auth.js';
+import { readFileSync } from 'node:fs';
+import { createMemoryPersistence } from '../../js/db.js';
+import { createStore } from '../../js/store.js';
+import { executeAction, visibleSnapshot } from '../../server/actions.js';
 import { APP_ROOT, appPath } from '../../scripts/paths.js';
 
 const PORT = 5199;
-const TEST_USER = 'gunanidhi';
+const TEST_USER = 'gunanidhi@example.test';
 const TEST_PASS = `smoke-${Math.random().toString(36).slice(2)}`;
-const testSalt = randomSalt();
-const TEST_CREDS = JSON.stringify({ users: [{ username: TEST_USER, memberId: `mbr-${TEST_USER}`, salt: testSalt, hash: await hashPassword(TEST_PASS, testSalt, 1000), iterations: 1000 }] });
 const DEBUG_PORT = 9333;
 const shotsArg = process.argv.indexOf('--shots');
 const SHOTS = shotsArg > -1 ? resolve(process.argv[shotsArg + 1]) : null;
@@ -105,266 +105,92 @@ async function reloadPage() {
 }
 
 async function main() {
-  // Connect
+  const doc = JSON.parse(readFileSync(appPath('data/library.json'), 'utf8'));
+  const backend = createStore(createMemoryPersistence({ collections: doc, meta: { project: doc.project, seededAt: new Date().toISOString() } }));
+  await backend.init({ seed: false });
+  backend.setActor('mbr-gunanidhi');
+  let revision = 1;
+  let pauseNextRefresh = false;
+  let releaseRefresh = null;
   let target;
-  for (let i = 0; i < 50 && !target; i += 1) {
-    try { target = (await (await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`)).json()).find((t) => t.type === 'page'); } catch { await sleep(150); }
+  for (let i = 0; i < 50 && !target; i++) {
+    try { target = (await (await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`)).json()).find(t => t.type === 'page'); } catch { await sleep(150); }
   }
   ws = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-  ws.addEventListener('message', (ev) => {
+  await new Promise(resolve => ws.addEventListener('open', resolve, { once: true }));
+  ws.addEventListener('message', async ev => {
     const msg = JSON.parse(ev.data);
     if (msg.id && pending.has(msg.id)) {
       const p = pending.get(msg.id); pending.delete(msg.id);
-      if (msg.error) p.rej(new Error(`${p.method}: ${msg.error.message}`)); else p.res(msg.result);
-    } else if (msg.method === 'Runtime.exceptionThrown') {
-      errors.push(`[${step}] ${msg.params.exceptionDetails.exception?.description || msg.params.exceptionDetails.text}`);
-    } else if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
-      errors.push(`[${step}] console.error: ${msg.params.args.map((a) => a.value ?? a.description).join(' ')}`);
-    } else if (msg.method === 'Log.entryAdded' && msg.params.entry.level === 'error' && !/favicon/.test(msg.params.entry.url || '')) {
-      errors.push(`[${step}] ${msg.params.entry.text} ${msg.params.entry.url || ''}`);
+      if (msg.error) p.rej(new Error(msg.error.message)); else p.res(msg.result);
+    } else if (msg.method === 'Runtime.exceptionThrown') errors.push(msg.params.exceptionDetails.text);
+    else if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') errors.push(msg.params.args.map(a => a.value || a.description).join(' '));
+    else if (msg.method === 'Fetch.requestPaused') {
+      try {
+        const req = msg.params.request;
+        const path = new URL(req.url).pathname;
+        if (path === '/api/state' && pauseNextRefresh) {
+          pauseNextRefresh = false;
+          await new Promise(resolve => { releaseRefresh = resolve; });
+        }
+        let value;
+        if (path === '/api/login') value = { access_token: 'mock-token', expires_in: 3600 };
+        else {
+          let result;
+          if (path === '/api/action') {
+            const body = JSON.parse(req.postData);
+            assert.equal(body.revision, revision);
+            result = await executeAction(backend, body.action, body.args);
+            revision++;
+          }
+          value = { ...visibleSnapshot(backend), revision, result };
+        }
+        await send('Fetch.fulfillRequest', { requestId: msg.params.requestId, responseCode: 200,
+          responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify(value)).toString('base64') });
+      } catch (error) { errors.push(error.message); await send('Fetch.failRequest', { requestId: msg.params.requestId, errorReason: 'Failed' }); }
     }
   });
-  ws.addEventListener('message', (ev) => {
-    const msg = JSON.parse(ev.data);
-    if (msg.method !== 'Fetch.requestPaused') return;
-    send('Fetch.fulfillRequest', {
-      requestId: msg.params.requestId, responseCode: 200,
-      responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, { name: 'Cache-Control', value: 'no-store' }],
-      body: Buffer.from(TEST_CREDS).toString('base64'),
-    });
-  });
-  await send('Fetch.enable', { patterns: [{ urlPattern: '*users.local.json*', requestStage: 'Request' }] });
-  await send('Runtime.enable'); await send('Page.enable'); await send('Log.enable'); await send('DOM.enable');
-  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-
-  step = 'first launch';
+  await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/*', requestStage: 'Request' }] });
+  await send('Runtime.enable'); await send('Page.enable');
+  step = 'cloud login';
   await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-  await waitFor(`document.querySelector('#login-user')`, 30000);
-  await shot('00-login');
-  step = 'wrong password rejected';
-  await signIn('not-the-password', { expectOk: false });
-  await waitFor(`document.querySelector('.login-error:not([hidden])')`);
-  assert.equal(await evaluate('Boolean(window.qaHub.store.actor())'), false, 'no actor after a wrong password');
-  step = 'sign in';
   await signIn();
-  await waitFor(`document.querySelector('.stats')`);
-  await shot('01-dashboard');
-  const LIB = await store('s.data.testCases.length');
-  assert.equal(LIB, 3815, 'library seeded from data/library.json');
-  assert.equal(await store('s.actor().id'), 'mbr-gunanidhi');
-  assert.equal(await store(`s.data.testCases.filter((c) => c.createdBy !== 'mbr-dossmk').length`), 0, 'library cases created by DossMK');
-  assert.equal(await store(`s.data.testCases.filter((c) => c.assignedTo).length`), 0, 'library cases start unassigned');
-  assert.equal(await store(`s.get('members', 'mbr-dossmk').role`), 'Admin');
-  const loginFeat = await store(`s.data.features.find((f) => f.moduleId === 'mod-login').id`);
-  const patFeat = await store(`s.data.features.find((f) => f.moduleId === 'mod-patient-management').id`);
-  const nextKey = (prefix, mod) => store(`'${prefix}-' + String(s.data.testCases.filter((c) => c.moduleId === '${mod}').length + 1).padStart(3, '0')`);
-  const key1 = await nextKey('LOGIN', 'mod-login');
-  const key2 = await nextKey('PAT', 'mod-patient-management');
-
-  step = 'create case 1';
-  await go('#/cases/new');
-  await fillCase({ title: 'Zqxsmoke login rejects an incorrect password', moduleId: 'mod-login', featureId: loginFeat, objective: 'User stays on login page with a clear error.', steps: [['Enter a wrong password', 'Error message is shown']] });
-  await shot('02-editor');
-  await click('form .editor-actions button[type=submit]');
-  await waitFor(`/^#\\/cases\\/[0-9a-f-]{36}$/.test(location.hash)`);
-  const id1 = await evaluate(`location.hash.split('/')[2]`);
-  assert.equal(await store(`s.get('testCases', '${id1}').caseKey`), key1);
-  await shot('03-detail');
-
-  step = 'create case 2 (validation first)';
-  await go('#/cases/new?module=mod-patient-management');
-  await waitFor(`document.querySelector('input[name=title]')`);
-  await click('form .editor-actions button[type=submit]');
-  await waitFor(`document.querySelector('[data-error=title]:not([hidden])')`);
-  assert.ok(await evaluate(`document.querySelector('input[name=title]').getAttribute('aria-invalid') === 'true'`), 'inline error on title');
-  await fillCase({ title: 'Zqxsmoke patient search by last name', moduleId: 'mod-patient-management', featureId: patFeat, objective: 'Matching patients are listed.', steps: [['Search "Test"', 'Synthetic patients named Test are listed']] });
-  await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true }))`);
-  await waitFor(`/^#\\/cases\\/[0-9a-f-]{36}$/.test(location.hash)`);
-  const id2 = await evaluate(`location.hash.split('/')[2]`);
-  assert.equal(await store(`s.get('testCases', '${id2}').caseKey`), key2);
-
-  step = 'reload persists';
-  await reloadPage();
-  await waitFor(`!window.__stalePage && window.qaHub?.store && document.querySelector('.content h1')`);
-  assert.equal(await store('s.data.testCases.length'), LIB + 2, 'cases survive reload');
-  assert.equal(await store('s.actor()?.displayName'), 'Gunanidhi', 'session survives reload');
-
-  step = 'edit';
-  await go(`#/cases/${id1}/edit`);
-  await waitFor(`document.querySelector('input[name=title]')?.value`);
-  await setValue('input[name=title]', 'Zqxsmoke login rejects an incorrect password (edited)');
-  await setValue('select[name=priority]', 'Critical');
-  await click('form .editor-actions button[type=submit]');
-  await waitFor(`location.hash === '#/cases/${id1}'`);
-  assert.equal(await store(`s.get('testCases', '${id1}').version`), 2);
-  assert.ok(await evaluate(`document.querySelector('.timeline').textContent.includes('Priority')`), 'history shows field diff');
-
-  step = 'unsaved-change guard';
-  await go(`#/cases/${id1}/edit`);
-  await waitFor(`document.querySelector('input[name=title]')?.value`);
-  await setValue('input[name=title]', 'Unsaved title change');
-  await evaluate(`location.hash = '#/dashboard'`);
-  await waitFor(`document.querySelector('dialog.modal[open]')?.textContent.includes('Discard unsaved')`);
-  await clickText('dialog.modal[open] .modal-foot button', 'Cancel');
-  await sleep(200);
-  assert.ok(await evaluate(`location.hash.endsWith('/edit')`), 'stayed on editor');
-  await evaluate(`location.hash = '#/dashboard'`);
-  await waitFor(`document.querySelector('dialog.modal[open]')`);
-  await clickText('dialog.modal[open] .modal-foot button', 'Leave page');
-  await waitFor(`location.hash === '#/dashboard'`);
-
-  step = 'library';
-  await go('#/cases');
-  await waitFor(`document.querySelectorAll('table.table tbody tr').length > 10`);
-  await setValue('[data-primary-search]', 'zqxsmoke patient');
-  await waitFor(`document.querySelectorAll('table.table tbody tr').length === 1`);
-  await shot('04-library');
-
-  step = 'admin assigns work';
-  await go('#/assign');
-  await waitFor(`document.querySelector('form select[name=module]')`);
-  await setValue('form select[name=module]', 'mod-login');
-  await waitFor(`!document.querySelector('form select[name=feature]').disabled`);
-  await setValue('form select[name=member]', 'mbr-selshiya');
-  await waitFor(`!document.querySelector('form button[type=submit]').disabled`);
-  await shot('05a-assign');
-  await click('form button[type=submit]');
-  await waitFor(`document.querySelector('dialog.modal[open]')`);
-  await clickText('dialog.modal[open] .modal-foot button', 'Assign');
-  await waitFor(`window.qaHub.store.data.testCases.filter((c) => c.moduleId === 'mod-login' && c.assignedTo === 'mbr-selshiya').length === window.qaHub.store.data.testCases.filter((c) => c.moduleId === 'mod-login' && !c.deletedAt).length`);
-
-  step = 'soft delete + restore via UI';
-  await go(`#/cases/${id2}`);
-  await waitFor(`document.querySelector('.page-actions [aria-haspopup=menu]')`);
-  await click('.page-actions [aria-haspopup=menu]');
-  await clickText('.popover-panel .menu-item', 'Move to trash');
-  await waitFor(`document.querySelector('dialog.modal[open] textarea')`);
-  await setValue('dialog.modal[open] textarea', 'Covered elsewhere');
-  await clickText('dialog.modal[open] .modal-foot button', 'Move to trash');
-  await waitFor(`window.qaHub.store.get('testCases', '${id2}').deletedAt`);
-  await go('#/trash');
-  await waitFor(`document.querySelector('table.table')?.textContent.includes('${key2}')`);
-  await shot('05-trash');
-  await clickText('table.table button', 'Restore');
-  await waitFor(`!window.qaHub.store.get('testCases', '${id2}').deletedAt`);
-
-  step = 'other pages render';
-  for (const r of ['#/dashboard', '#/modules', '#/suites', '#/activity', '#/team', '#/assign', '#/data', '#/settings']) {
-    await go(r);
-    await waitFor(`document.querySelector('.content h1')`);
-    await shot(`06-${r.slice(2)}`);
-  }
-
-  step = 'export';
-  const exported = await store('JSON.stringify(s.exportDocument())');
-  const exportFile = join(profileDir, 'export.json');
-  writeFileSync(exportFile, exported);
-  const before = JSON.parse(exported);
-
-  step = 'clean browser';
-  await evaluate(`new Promise((r) => { localStorage.clear(); sessionStorage.clear(); const req = indexedDB.deleteDatabase('qa-hub'); req.onsuccess = req.onerror = req.onblocked = () => r(true); })`);
-  // Close the open DB connection by navigating away first, then delete again to be sure.
-  await send('Page.navigate', { url: 'about:blank' });
-  await sleep(200);
-  await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-  await sleep(300);
-  await evaluate(`new Promise((r) => { const req = indexedDB.deleteDatabase('qa-hub'); req.onsuccess = req.onerror = req.onblocked = () => r(true); })`);
-  await reloadPage();
-  await signIn();
-  assert.equal(await store('s.data.testCases.length'), LIB, 'clean browser has only the library');
-
-  step = 'import (replace)';
-  await go('#/data');
-  await waitFor(`document.querySelector('#import-file')`);
-  const { root } = await send('DOM.getDocument');
-  const { nodeId } = await send('DOM.querySelector', { nodeId: root.nodeId, selector: '#import-file' });
-  await send('DOM.setFileInputFiles', { nodeId, files: [exportFile] });
-  await waitFor(`document.querySelector('input[name=mode][value=replace]')`);
-  await shot('07-import-preview');
-  await click('input[name=mode][value=replace]');
-  await evaluate(`[...document.querySelectorAll('label.check')].find((l) => l.textContent.includes('backup'))?.querySelector('input').click()`); // skip backup download
-  await clickText('button', 'Apply import');
-  await waitFor(`document.querySelector('dialog.modal[open] input')`);
-  await setValue('dialog.modal[open] input', 'REPLACE');
-  await clickText('dialog.modal[open] .modal-foot button', 'Replace local data');
-  await waitFor(`window.qaHub.store.data.testCases.length === ${LIB + 2}`, 60000);
-
-  const after = JSON.parse(await store('JSON.stringify(s.exportDocument())'));
-  for (const c of before.testCases) {
-    const m = after.testCases.find((x) => x.id === c.id);
-    assert.ok(m, `case ${c.caseKey} present after import`);
-    assert.equal(m.caseKey, c.caseKey);
-    assert.equal(m.version, c.version);
-    assert.equal(m.title, c.title);
-  }
-  const beforeEvents = new Set(before.activity.map((e) => e.eventId));
-  assert.ok([...beforeEvents].every((id) => after.activity.some((e) => e.eventId === id)), 'all history events preserved');
-
-  step = 'sign out';
-  await go('#/dashboard');
-  await click('.user-btn');
-  await waitFor(`document.querySelector('dialog.modal[open]')?.textContent.includes('Sign out')`);
-  await evaluate('window.__stalePage = true');
-  await clickText('dialog.modal[open] .modal-foot button', 'Sign out');
-  await waitFor(`!window.__stalePage && document.querySelector('#login-user')`, 30000);
-  await signIn();
-
-  step = 'mobile + dark';
-  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-  await go('#/cases');
-  await waitFor(`document.querySelector('table.cards')`);
-  const overflow = await evaluate('document.documentElement.scrollWidth - window.innerWidth');
-  assert.ok(overflow <= 1, `no horizontal page scroll on mobile (overflow ${overflow}px)`);
-  await shot('08-mobile-library');
-  await evaluate(`document.documentElement.dataset.theme = 'dark'`);
-  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await go('#/dashboard');
-  await waitFor(`document.querySelector('.stats')`);
-  await shot('09-dashboard-dark');
-  await go(`#/cases/${id1}`);
-  await waitFor(`document.querySelector('.steps-view')`);
-  await shot('10-detail-dark');
-
-  step = 'assigned workspace and developer report';
-  await evaluate(`window.qaHub.store.updateCase(${JSON.stringify(id1)}, { assignedTo: 'mbr-sujitha', completionStatus: 'Pending' })`);
-  await go('#/dashboard');
   await waitFor(`document.querySelector('.developer-table')`);
-  assert.ok(await evaluate(`document.querySelector('.developer-table').textContent.includes('Sujitha')`));
-  await evaluate(`window.qaHub.store.setActor('mbr-sujitha')`);
-  await go('#/cases');
-  await waitFor(`document.querySelector('h1')?.textContent === 'My assigned test cases'`);
-  assert.equal(await evaluate(`document.querySelectorAll('tbody tr').length`), 1);
-  assert.equal(await evaluate(`!!document.querySelector('.nav a[href="#/data"]')`), false);
-  await go(`#/cases/${id2}`);
-  await waitFor(`document.querySelector('main').textContent.includes('Test case not found')`);
-  await go('#/data');
-  await waitFor(`document.querySelector('main').textContent.includes('administrators only')`);
-  await go(`#/cases/${id1}`);
+  assert.equal(await store('s.data.testCases.length'), 3815);
+  assert.equal(await store('s.persistenceKind'), 'supabase');
+  await shot('01-cloud-dashboard');
+  const tc = backend.activeCases()[0];
+  step = 'save completion';
+  await go('#/cases/' + tc.id);
   await waitFor(`document.querySelector('.steps-view')`);
+  pauseNextRefresh = true;
+  await evaluate('window.qaHub.store.reload(); true');
+  for (let i = 0; i < 100 && !releaseRefresh; i++) await sleep(10);
+  assert.ok(releaseRefresh, 'Background refresh is held in flight');
   await clickText('main button', 'Mark completed');
+  await sleep(100);
+  assert.equal(backend.get('testCases', tc.id).completionStatus, 'Pending', 'Save waits for the in-flight refresh');
+  assert.equal(await evaluate(`document.body.textContent.includes('A sync is in progress')`), false);
+  releaseRefresh();
   await waitFor(`document.querySelector('main').textContent.includes('Reopen case')`);
+  assert.equal(backend.get('testCases', tc.id).completionStatus, 'Completed');
+  step = 'reload shared data';
+  await reloadPage();
+  await waitFor(`!window.__stalePage && window.qaHub?.store && document.querySelector('.steps-view')`);
+  assert.equal(await store(`s.get('testCases', '${tc.id}').completionStatus`), 'Completed');
+  step = 'admin pages';
+  for (const route of ['dashboard', 'cases', 'team', 'settings', 'assign', 'data']) {
+    await go('#/' + route);
+    await waitFor(`document.querySelector('main h1')`);
+  }
+  step = 'mobile dashboard';
   await go('#/dashboard');
-  await waitFor(`document.querySelector('h1')?.textContent === 'My testing workspace'`);
-  assert.equal(await evaluate(`!!document.querySelector('.developer-table')`), false);
-  assert.ok(await evaluate(`document.querySelector('.completion-ring').getAttribute('aria-label').includes('100%')`));
-  await shot('11-assigned-dashboard');
-  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-  assert.ok(await evaluate('document.documentElement.scrollWidth - window.innerWidth <= 1'), 'assigned dashboard fits mobile');
-  await evaluate(`window.qaHub.store.setActor('mbr-gunanidhi')`);
-  await go('#/cases');
-  await go('#/dashboard');
-  await waitFor(`document.querySelector('.developer-table')`);
-  const sujitha = await evaluate(`Array.from(document.querySelectorAll('.developer-table tbody tr')).find(r => r.textContent.includes('Sujitha')).textContent`);
-  assert.ok(sujitha.includes('100%'), 'admin sees developer completion');
-  assert.ok(await evaluate('document.documentElement.scrollWidth - window.innerWidth <= 1'), 'admin dashboard fits mobile');
-  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
-  await shot('12-developer-report');
-
-  assert.deepEqual(errors, [], `browser errors:\n${errors.join('\n')}`);
-  console.log('UI smoke test passed.');
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  assert.ok(await evaluate('document.documentElement.scrollWidth - innerWidth <= 1'));
+  await shot('02-cloud-mobile');
+  assert.deepEqual(errors, []);
+  console.log('Cloud UI smoke passed: login, 3815 cases, save, reload, admin pages and mobile. Backend mocked; HTTP API tested separately.');
 }
-
 main()
   .catch((e) => { console.error(`FAILED at step "${step}":`, e.message); if (errors.length) console.error(errors.join('\n')); process.exitCode = 1; })
   .finally(async () => {

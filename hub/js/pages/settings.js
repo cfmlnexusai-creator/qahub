@@ -68,17 +68,19 @@ export function render({ store, root, setCrumbs }) {
 
   // ---- storage ----
   const storageInfo = h('dl', { class: 'kv' },
-    h('dt', null, 'Storage engine'), h('dd', null, store.persistenceKind === 'indexeddb' ? 'IndexedDB (this browser profile only)' : 'Memory only — data is lost on reload'),
+    h('dt', null, 'Storage engine'), h('dd', null, store.persistenceKind === 'supabase' ? 'Supabase (shared team workspace)' : 'Local storage'),
     h('dt', null, 'Schema version'), h('dd', null, String(SCHEMA_VERSION)),
     h('dt', null, 'Records'), h('dd', null, `${plural(store.data.testCases.length, 'case')}, ${plural(store.data.modules.length, 'module')}, ${plural(store.data.features.length, 'feature')}, ${plural(store.data.members.length, 'profile')}, ${plural(store.data.activity.length, 'history event')}`),
     h('dt', null, 'Last full export'), h('dd', null, store.meta.lastExportAt ? fmtDate(store.meta.lastExportAt) : 'Never'));
   const usage = h('dd', null, 'Checking…');
   const persisted = h('dd', null, 'Checking…');
   storageInfo.append(h('dt', null, 'Usage / quota'), usage, h('dt', null, 'Persistent storage'), persisted);
-  if (navigator.storage?.estimate) {
+  if (store.persistenceKind === 'supabase') { usage.textContent = 'Managed in Supabase'; persisted.textContent = 'Shared changes are saved on the server'; }
+  else if (navigator.storage?.estimate) {
     navigator.storage.estimate().then((e) => { usage.textContent = `${fmtBytes(e.usage)} of ${fmtBytes(e.quota)}`; }).catch(() => { usage.textContent = 'Unavailable'; });
   } else usage.textContent = 'Unavailable';
-  if (navigator.storage?.persisted) {
+  if (store.persistenceKind === 'supabase') { /* No browser persistence required for shared data. */ }
+  else if (navigator.storage?.persisted) {
     navigator.storage.persisted().then((p) => {
       persisted.replaceChildren(p ? 'Granted — the browser will not evict data automatically' : h('span', null, 'Not granted — the browser may evict data under storage pressure. ',
         h('button', { type: 'button', class: 'btn-link', onClick: () => navigator.storage.persist().then((ok) => { toast(ok ? 'Persistent storage granted' : 'The browser declined persistent storage', { type: ok ? 'success' : 'error' }); }) }, 'Request')));
@@ -130,9 +132,9 @@ export function render({ store, root, setCrumbs }) {
         ...[['/', 'Focus search'], ['N', 'New test case'], ['Ctrl/⌘ + S', 'Save in editor'], ['Esc', 'Close dialog'], ['?', 'Shortcut help']].flatMap(([k, v]) => [h('dt', null, h('kbd', null, k)), h('dd', null, v)])) })),
     h('div', { class: 'stack' },
       card({ title: 'Security & trust limitations', body: h('div', { class: 'stack', style: { gap: '10px' } },
-        banner('warn', [h('strong', null, 'Roles are UI conveniences, not access control.'), h('span', null, 'Anyone with the static files, browser DevTools or the JSON can switch profile, change roles or edit data.')]),
-        banner('info', [h('strong', null, 'Activity log, not an audit trail.'), h('span', null, 'Actor names and timestamps come from this browser and can be edited. For regulated auditability a backend with real authentication and server-side append-only logs is required.')]),
-        banner('info', [h('strong', null, 'No live sync.'), h('span', null, 'Edits are visible to teammates only after you export and they import (via Git).')]),
+        banner('warn', [h('strong', null, 'Authenticated team access.'), h('span', null, 'Supabase verifies identity. The Node.js API enforces roles and assignment restrictions.')]),
+        banner('info', [h('strong', null, 'Activity log, not an audit trail.'), h('span', null, 'Normal edits record the authenticated member and server time. Admin imports can replace history; this is not a compliance audit trail.')]),
+        banner('info', [h('strong', null, 'Shared progress.'), h('span', null, 'Saved changes appear for teammates on refresh, on window focus, or within 15 seconds.')]),
         banner('danger', [h('strong', null, 'No PHI or secrets.'), h('span', null, 'Use synthetic data only. Never enter patient information, credentials, API tokens or payment details.')])) }),
       card({ title: 'Storage', body: storageInfo }),
       card({ title: 'Data management', body: h('div', { class: 'stack' },
@@ -144,7 +146,7 @@ export function render({ store, root, setCrumbs }) {
         h('div', { class: 'menu-sep' }),
         h('div', { class: 'stack', style: { gap: '8px' } },
           h('strong', null, 'Erase local data'),
-          h('p', { class: 'muted small' }, 'Deletes everything stored by QA Hub in this browser (a backup JSON is downloaded first).'),
-          h('div', null, h('button', { type: 'button', class: 'btn btn-danger', disabled: !isAdmin, onClick: resetAll }, 'Erase local data…'))),
+          h('p', { class: 'muted small' }, 'Workspace deletion is disabled in the hosted application.'),
+          h('div', null, h('button', { type: 'button', class: 'btn btn-danger', disabled: true, onClick: resetAll }, 'Erase local data…'))),
         !isAdmin ? h('p', { class: 'muted small' }, 'Admin profile required for these actions.') : null) }))));
 }

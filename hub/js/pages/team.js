@@ -14,7 +14,7 @@ const ROLE_HELP = {
 function memberDialog(store, existing = null) {
   return formDialog({
     title: existing ? `Edit ${existing.displayName}` : 'Add team member',
-    description: 'Profiles are local labels. They are not accounts and are not authenticated.',
+    description: 'Create a team profile, then link its ID to an invited Supabase Auth user before sign-in.',
     fields: [
       { name: 'displayName', label: 'Display name', required: true, value: existing?.displayName },
       { name: 'memberId', label: 'Team member ID', required: true, value: existing?.memberId, hint: 'Unique, lowercase, e.g. priya.s' },
@@ -45,9 +45,9 @@ export function render({ store, root, setCrumbs, profilePicker, authMode }) {
     ],
   }));
   root.append(h('div', { style: { marginBottom: '16px' } }, banner('info', [
-    h('strong', null, 'Roles are a convenience, not access control.'),
+    h('strong', null, 'Team access is enforced by the server.'),
     h('span', null, pw
-      ? 'Sign-in is checked in the browser only. Anyone with these files or DevTools can bypass it or edit data. Use Git pull-request review for shared data. A new member can sign in only after an Admin adds them to data/users.local.json with scripts/create-users.js.'
+      ? 'Admins manage the shared workspace. Other members can access only assigned cases. New profiles must be linked to a Supabase Auth user by the project administrator.'
       : 'Anyone with these files or browser DevTools can switch profile or edit data. Use Git pull-request review for shared data.'),
   ])));
   if (store.data.members.some((m) => m.placeholder)) {

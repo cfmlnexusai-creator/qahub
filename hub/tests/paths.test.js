@@ -30,15 +30,11 @@ test('relative JS imports and HTML assets resolve inside the relocated app', () 
   assert.equal(appPath('scripts/serve.js'), resolve(APP_ROOT, 'scripts/serve.js'));
 });
 
-test('repository entry redirects to hub while preserving query and hash under Pages subpaths', () => {
-  const html = readFileSync(appPath('../index.html'), 'utf8');
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-  for (const prefix of ['https://example.github.io/qa-hub/', 'https://example.github.io/']) {
-    let target;
-    runInNewContext(script, { URL, location: {
-      href: `${prefix}?test=1#/cases/example`, search: '?test=1', hash: '#/cases/example',
-      replace(value) { target = value; },
-    } });
-    assert.equal(target, `${prefix}hub/?test=1#/cases/example`);
+test('Vercel build publishes only public app assets', async () => {
+  const { execFileSync } = await import('node:child_process');
+  execFileSync(process.execPath, [appPath('scripts/build.js')]);
+  assert.ok(existsSync(appPath('dist/index.html')));
+  for (const privatePath of ['data', 'server', '.env', 'scripts', 'supabase']) {
+    assert.equal(existsSync(appPath('dist/' + privatePath)), false);
   }
 });

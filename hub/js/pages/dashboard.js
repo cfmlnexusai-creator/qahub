@@ -89,7 +89,7 @@ export function render({ store, root, setCrumbs }) {
 
   root.append(pageHead({
     title: isAdmin(store) ? store.meta.project.name : 'My testing workspace',
-    subtitle: !isAdmin(store) ? 'Only your assigned test cases. Track pending work and completed execution here.' : `Documented test cases across ${store.data.modules.filter((m) => !m.archived).length} modules. Figures come only from data in this browser.`,
+    subtitle: !isAdmin(store) ? 'Only your assigned test cases. Track pending work and completed execution here.' : `Shared test cases across ${store.data.modules.filter((m) => !m.archived).length} modules. Progress refreshes every 15 seconds.`,
   }));
 
   if (active.some((c) => c.demo)) {
@@ -153,7 +153,7 @@ export function render({ store, root, setCrumbs }) {
     root.append(card({ title: 'Developer execution report', cls: 'developer-report-card',
       actions: h('a', { class: 'small', href: '#/assign' }, 'Manage assignments'),
       body: h('div', { class: 'developer-report' },
-        h('p', { class: 'muted small' }, 'All non-deleted assigned cases. Completed means executed, not passed. Reports reflect data loaded in this browser.'),
+        h('p', { class: 'muted small' }, 'All non-deleted assigned cases. Completed means executed, not passed. Reports reflect the shared team workspace.'),
         h('div', { class: 'developer-table-wrap' }, h('table', { class: 'developer-table' },
           h('thead', null, h('tr', null, ['Developer', 'Assigned', 'Pending', 'Completed', 'Progress'].map((label) => h('th', { scope: 'col' }, label)))),
           h('tbody', null, rows.map((row) => h('tr', null,
