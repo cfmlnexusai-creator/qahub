@@ -2,6 +2,21 @@ import { h, icon, prefs, plural } from '../utils.js';
 import { pageHead, card, person, emptyState, menu, plainChip } from '../components/ui.js';
 import { formDialog, confirmDialog } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
+import { isAdmin } from '../visibility.js';
+
+export async function toggleModuleSharing(store, module) {
+  const sharing = !module.sharedWithTeam;
+  const ok = await confirmDialog({
+    title: sharing ? `Share ${module.name} with everyone?` : `Stop sharing ${module.name}?`,
+    message: sharing
+      ? 'Every active team member will be able to view this module and claim its unassigned cases. Sharing does not reassign existing work or grant edit/delete access to other people’s cases.'
+      : 'Team-wide access and new self-assignments will stop. Existing assignees and creators keep access to their cases.',
+    confirmLabel: sharing ? 'Share with everyone' : 'Stop sharing',
+  });
+  if (!ok) return;
+  try { await store.setModuleShared(module.id, sharing); toast(sharing ? 'Module shared with everyone' : 'Module sharing stopped'); }
+  catch (error) { toastError(error); }
+}
 
 export function moduleDialog(store, existing = null) {
   const owners = [{ value: '', label: 'No owner' }, ...store.data.members.filter((m) => m.active !== false).map((m) => ({ value: m.id, label: m.displayName }))];
@@ -61,7 +76,7 @@ export function render({ store, root, setCrumbs, router }) {
     actions: [toggle, canEdit && h('button', { type: 'button', class: 'btn btn-primary', onClick: () => moduleDialog(store) }, icon('plus', 16), 'New module')],
   }));
 
-  const mods = store.data.modules.filter((m) => showArchived || !m.archived).sort((a, b) => (a.archived - b.archived) || (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+  const mods = store.data.modules.filter((m) => (showArchived || !m.archived) && (isAdmin(store) || m.sharedWithTeam || active.some(c => c.moduleId === m.id))).sort((a, b) => (a.archived - b.archived) || (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
   if (!mods.length) {
     root.append(card({ body: emptyState({ iconName: 'modules', title: 'No modules yet', text: 'Add the modules of the application under test, e.g. Patients or Billing.', action: canEdit && h('button', { type: 'button', class: 'btn btn-primary', onClick: () => moduleDialog(store) }, 'New module') }) }));
     return;
@@ -102,6 +117,9 @@ export function render({ store, root, setCrumbs, router }) {
           m.archived ? { label: 'Unarchive', icon: 'restore', onClick: () => archive('modules', m, false) } : { label: 'Archive module', icon: 'archive', onClick: () => archive('modules', m, true) },
         ], { label: `Actions for ${m.name}` })),
       h('div', { class: 'card-body' },
+        m.sharedWithTeam && plainChip('Shared with everyone'),
+        store.can('module.share') && h('button', { type: 'button', class: 'btn btn-sm', disabled: m.archived && !m.sharedWithTeam, onClick: () => toggleModuleSharing(store, m) }, m.sharedWithTeam ? 'Stop sharing' : 'Share with everyone'),
+        m.sharedWithTeam && h('p', { class: 'muted small' }, 'Open the case list and use Assign to me on an unassigned case.'),
         m.description ? h('p', { class: 'muted small' }, m.description) : null,
         h('div', { class: 'row small' },
           h('span', null, h('strong', null, String(mCases.length)), ' cases'),

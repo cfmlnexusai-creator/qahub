@@ -89,6 +89,7 @@ export const FIELD_LABELS = {
   name: 'Name',
   keyPrefix: 'Key prefix',
   ownerId: 'Owner',
+  sharedWithTeam: 'Shared with everyone',
   targetCases: 'Target cases',
   archived: 'Archived',
   role: 'Role',

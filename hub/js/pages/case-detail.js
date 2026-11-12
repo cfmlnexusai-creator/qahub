@@ -5,7 +5,7 @@ import {
 import { timeline } from '../components/timeline.js';
 import { confirmDialog } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
-import { canEditCase } from '../visibility.js';
+import { canEditCase, canClaimCase } from '../visibility.js';
 
 export function render({ store, root, params, setCrumbs, router }) {
   const c = store.get('testCases', params.id);
@@ -62,6 +62,10 @@ export function render({ store, root, params, setCrumbs, router }) {
   };
 
   const actions = h('div', { class: 'page-actions' },
+    canClaimCase(store, c) && h('button', { type: 'button', class: 'btn btn-primary', onClick: async (event) => {
+      const button = event.currentTarget; button.disabled = true;
+      try { await store.claimCase(c.id); toast(`${c.caseKey} assigned to you`); } catch (error) { toastError(error); } finally { button.disabled = false; }
+    } }, icon('user', 16), 'Assign to me'),
     c.deletedAt && canEditCase(store, c) && h('button', { type: 'button', class: 'btn btn-primary', onClick: () => store.restoreCase(c.id).then(() => toast(`${c.caseKey} restored`)).catch(toastError) }, icon('restore', 16), 'Restore'),
     canEdit && !c.deletedAt && h('button', { type: 'button', class: 'btn btn-primary', onClick: async () => {
       try {

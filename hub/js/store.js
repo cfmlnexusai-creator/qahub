@@ -42,6 +42,8 @@ export const PERMISSIONS = {
   'case.purge': ['Admin'],
   'case.bulk': ['Admin', 'Maintainer', 'Contributor'],
   'case.assign': ['Admin'], // only an Admin assigns work
+  'case.claim': ['Admin', 'Maintainer', 'Contributor'],
+  'module.share': ['Admin'],
   'structure.edit': ['Admin', 'Maintainer'],
   'team.edit': ['Admin'],
   'data.import': ['Admin', 'Maintainer'],
@@ -413,6 +415,30 @@ export function createStore(persistence) {
     return records.length;
   }
 
+  async function claimCase(id) {
+    const me = requireActor('case.claim');
+    const current = get('testCases', id);
+    const module = current && get('modules', current.moduleId);
+    if (!current || current.deletedAt || current.status === 'Deprecated' || !module?.sharedWithTeam || module.archived) {
+      throw new PermissionError('Only active cases in a module shared with everyone can be self-assigned.');
+    }
+    if (current.assignedTo) throw new ConflictError('This case is already assigned. Choose an unassigned case.');
+    const record = { ...current, assignedTo: me.id, version: current.version + 1, updatedBy: me.id, updatedAt: nowIso() };
+    const event = makeEvent({ entityType: 'testCase', entityId: id, entityLabel: current.caseKey, moduleId: current.moduleId,
+      action: 'update', actorId: me.id, changedFields: [{ field: 'assignedTo', before: '', after: me.id }], note: 'Self-assigned from a module shared with everyone.' });
+    await commit({ put: { testCases: [record] }, events: [event] }, { entity: 'testCase', id });
+    return record;
+  }
+
+  async function setModuleShared(id, shared) {
+    const me = requireActor('module.share');
+    const current = get('modules', id);
+    if (!current) throw new ConflictError('Module not found.');
+    if (typeof shared !== 'boolean') throw new ValidationError({ sharedWithTeam: 'Choose whether to share this module.' });
+    if (current.archived && shared) throw new ConflictError('Unarchive the module before sharing it.');
+    return saveVersioned('modules', current, { ...current, sharedWithTeam: shared }, me);
+  }
+
   // ---- modules & features ---------------------------------------------------------------
   async function saveModule(input) {
     const me = requireActor('structure.edit');
@@ -732,7 +758,7 @@ export function createStore(persistence) {
     get persistenceKind() { return persistence.kind; },
     get, activeCases, actor, setActor, can, nextCaseKey,
     createCase, updateCase, softDeleteCases, restoreCase, purgeCase, reviewCase, bulkUpdateCases,
-    saveModule, saveFeature, setArchived,
+    saveModule, saveFeature, setArchived, setModuleShared, claimCase,
     saveMember, logProfileSwitch,
     saveLabel, deleteLabel, labelUsage,
     updateProject, exportDocument, markExported, hasUnexportedChanges, clearDemoData, resetAll,

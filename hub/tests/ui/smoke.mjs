@@ -199,6 +199,12 @@ async function main() {
   assert.ok(await evaluate('document.documentElement.scrollWidth - innerWidth <= 1'));
   await shot('02-cloud-mobile');
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  step = 'Admin shares navigation module';
+  await go('#/cases?module=mod-navigation-page-checks');
+  await clickText('main button', 'Share with everyone');
+  await waitFor(`document.querySelector('dialog[open]')`);
+  await clickText('dialog[open] .modal-foot button', 'Share with everyone');
+  await waitFor(`window.qaHub.store.get('modules','mod-navigation-page-checks').sharedWithTeam === true`);
   step = 'Contributor login';
   await backend.bulkUpdateCases([tc.id], { assignedTo: 'mbr-sujitha' }); revision++;
   await evaluate(`sessionStorage.removeItem('qa-hub-cloud-session'); localStorage.removeItem('qa-hub-cloud-session'); true`);
@@ -208,6 +214,17 @@ async function main() {
   await setValue('#login-pass', TEST_PASS);
   await evaluate(`document.querySelector('.login-form').requestSubmit()`);
   await waitFor(`window.qaHub?.store.actor()?.id === 'mbr-sujitha' && document.querySelector('.topbar')`);
+  step = 'Contributor browses shared module and self-assigns';
+  await go('#/modules');
+  await waitFor(`document.querySelector('main').textContent.includes('Shared with everyone')`);
+  assert.equal(await evaluate(`[...document.querySelectorAll('main button')].some(b => b.textContent === 'Stop sharing')`), false);
+  const sharedCase = navigation.testCases[0];
+  await go('#/cases/' + sharedCase.id);
+  await waitFor(`document.querySelector('.steps-view')`);
+  await clickText('main button', 'Assign to me');
+  await waitFor(`window.qaHub.store.get('testCases','${sharedCase.id}').assignedTo === 'mbr-sujitha'`);
+  assert.equal(backend.get('testCases', sharedCase.id).assignedTo, 'mbr-sujitha');
+  assert.equal(await evaluate(`!!document.querySelector('main a[href$="/edit"]')`), false, 'Claim does not grant creator-only edit rights');
   step = 'Contributor assigned case is read-only';
   await go('#/cases/' + tc.id);
   await waitFor(`document.querySelector('.steps-view')`);
@@ -241,7 +258,7 @@ async function main() {
   await waitFor(`document.querySelector('main').textContent.includes('Contributor-owned navigation test updated')`);
   assert.equal(await evaluate(`document.querySelector('main').textContent.includes('Delete forever')`), false);
   assert.deepEqual(errors, []);
-  console.log('Cloud UI smoke passed: 3915 cases, Page checks section, sync/save, Admin pages/mobile, Contributor create/edit/delete, assigned case read-only.');
+  console.log('Cloud UI smoke passed: 3915 cases, Admin shares module, Contributor views/claims shared case, creator-only management, sync/save and mobile.');
 }
 main()
   .catch((e) => { console.error(`FAILED at step "${step}":`, e.message); if (errors.length) console.error(errors.join('\n')); process.exitCode = 1; })

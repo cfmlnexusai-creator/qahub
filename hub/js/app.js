@@ -174,7 +174,7 @@ function toggleTheme() {
 function renderChrome() {
   const path = router?.current?.path || '';
   const visibleStore = assignedStore(store);
-  shell.nav.replaceChildren(...NAV.filter((n) => (isAdmin(store) || n.section === 'Workspace' || n.moduleId || ['#/dashboard', '#/cases', '#/trash'].includes(n.href)) && (!n.show || n.show(visibleStore))).map((n) => {
+  shell.nav.replaceChildren(...NAV.filter((n) => (isAdmin(store) || n.section === 'Workspace' || n.moduleId || ['#/dashboard', '#/cases', '#/modules', '#/trash'].includes(n.href)) && (!n.show || n.show(visibleStore))).map((n) => {
     if (n.section) return h('div', { class: 'nav-section' }, n.section);
     const count = n.count ? n.count(visibleStore) : '';
     const sectionActive = n.moduleId ? router.current?.query.module === n.moduleId : n.href !== '#/cases' || router.current?.query.module !== 'mod-navigation-page-checks';
@@ -216,7 +216,7 @@ function renderPage(current, { keepScroll = false } = {}) {
   currentPage = page;
   clear(shell.content);
   renderChrome();
-  if (!isAdmin(store) && ![dashboard, cases, caseDetail, caseEditor, trash].includes(page)) {
+  if (!isAdmin(store) && ![dashboard, cases, caseDetail, caseEditor, modules, trash].includes(page)) {
     shell.content.append(banner('warn', [h('strong', null, 'This page is available to administrators only.'), h('a', { href: '#/cases' }, 'View my assigned cases')]));
     return;
   }

@@ -1,0 +1,92 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createStore } from '../js/store.js';
+import { createMemoryPersistence } from '../js/db.js';
+import { assignedStore, canClaimCase, canEditCase } from '../js/visibility.js';
+import { executeAction, visibleSnapshot } from '../server/actions.js';
+
+async function fixture() {
+  const store = createStore(createMemoryPersistence());
+  await store.init();
+  const admin = store.data.members.find(m => m.role === 'Admin');
+  const contributors = store.data.members.filter(m => m.role === 'Contributor');
+  const viewer = store.data.members.find(m => m.role === 'Viewer');
+  store.setActor(admin.id);
+  const tc = store.activeCases()[0];
+  await store.bulkUpdateCases([tc.id], { assignedTo: '', status: 'Draft' });
+  return { store, admin, contributors, viewer, tc: store.get('testCases', tc.id), module: store.get('modules', tc.moduleId) };
+}
+test('only Admins share a module; all members see its current/future cases without gaining edit access', async () => {
+  const { store, admin, contributors, viewer, tc, module } = await fixture();
+  store.setActor(contributors[0].id);
+  assert.equal(assignedStore(store).get('testCases', tc.id), null);
+  await assert.rejects(executeAction(store, 'setModuleShared', [module.id, true]), /Administrator/);
+  store.setActor(admin.id);
+  await executeAction(store, 'setModuleShared', [module.id, true]);
+  assert.equal(store.get('modules', module.id).sharedWithTeam, true);
+  const later = await executeAction(store, 'createCase', [{ ...tc, caseKey: '', title: 'Future case in shared module' }]);
+  await store.saveModule({ ...store.get('modules', module.id), description: 'Updated description' });
+  assert.equal(store.get('modules', module.id).sharedWithTeam, true, 'Editing module metadata preserves sharing');
+  for (const member of [...contributors, viewer]) {
+    store.setActor(member.id);
+    const scoped = assignedStore(store);
+    assert.equal(scoped.get('testCases', tc.id).id, tc.id);
+    assert.equal(scoped.get('testCases', later.id).id, later.id);
+    assert.equal(canEditCase(scoped, tc), false);
+    await assert.rejects(executeAction(store, 'updateCase', [tc.id, { title: 'Not the creator' }]), /you created/);
+    assert.equal(canClaimCase(scoped, scoped.get('testCases', tc.id)), member.role !== 'Viewer');
+  }
+});
+test('self-assignment uses the authenticated actor, never steals assigned work, and keeps creator-only editing', async () => {
+  const { store, admin, contributors, tc, module } = await fixture();
+  await executeAction(store, 'setModuleShared', [module.id, true]);
+  store.setActor(contributors[0].id);
+  const claimed = await executeAction(store, 'claimCase', [tc.id, { assignedTo: contributors[1].id }]);
+  assert.equal(claimed.assignedTo, contributors[0].id);
+  assert.equal(claimed.createdBy, tc.createdBy);
+  assert.equal(claimed.version, tc.version + 1);
+  assert.equal(store.data.activity.at(-1).actorId, contributors[0].id);
+  assert.match(store.data.activity.at(-1).note, /Self-assigned/);
+  await assert.rejects(executeAction(store, 'softDeleteCases', [[tc.id]]), /you created/);
+  store.setActor(contributors[1].id);
+  await assert.rejects(executeAction(store, 'claimCase', [tc.id]), /already assigned/);
+  assert.equal(store.get('testCases', tc.id).assignedTo, contributors[0].id);
+  const snapshot = visibleSnapshot(store);
+  assert.ok(snapshot.collections.members.some(m => m.id === contributors[0].id && m.displayName));
+  store.setActor(admin.id);
+  await executeAction(store, 'setModuleShared', [module.id, false]);
+  store.setActor(contributors[1].id);
+  assert.equal(assignedStore(store).get('testCases', tc.id), null);
+  store.setActor(contributors[0].id);
+  assert.equal(assignedStore(store).get('testCases', tc.id).id, tc.id, 'Existing assignee keeps access after unsharing');
+});
+test('private, archived, deleted, deprecated and Viewer/inactive claims are rejected', async () => {
+  const { store, admin, contributors, viewer, tc, module } = await fixture();
+  store.setActor(contributors[0].id);
+  await assert.rejects(executeAction(store, 'claimCase', [tc.id]), /shared with everyone/);
+  store.setActor(admin.id);
+  await executeAction(store, 'setModuleShared', [module.id, true]);
+  store.setActor(viewer.id);
+  await assert.rejects(executeAction(store, 'claimCase', [tc.id]), /cannot do this/);
+  store.setActor(admin.id);
+  await store.bulkUpdateCases([tc.id], { status: 'Deprecated' });
+  store.setActor(contributors[0].id);
+  await assert.rejects(executeAction(store, 'claimCase', [tc.id]), /active cases/);
+  store.setActor(admin.id);
+  await store.bulkUpdateCases([tc.id], { status: 'Draft' });
+  await store.softDeleteCases([tc.id], 'Test');
+  store.setActor(contributors[0].id);
+  assert.equal(assignedStore(store).get('testCases', tc.id), null, 'Shared trash is not exposed');
+  await assert.rejects(executeAction(store, 'claimCase', [tc.id]), /active cases/);
+  store.setActor(admin.id);
+  await store.restoreCase(tc.id);
+  await store.setArchived('modules', module.id, true);
+  store.setActor(contributors[0].id);
+  await assert.rejects(executeAction(store, 'claimCase', [tc.id]), /active cases/);
+  store.setActor(admin.id);
+  await assert.rejects(executeAction(store, 'setModuleShared', [module.id, true]), /Unarchive/);
+  await store.setArchived('modules', module.id, false);
+  await store.saveMember({ ...contributors[0], active: false });
+  store.setActor(contributors[0].id);
+  await assert.rejects(executeAction(store, 'claimCase', [tc.id]), /cannot do this/);
+});

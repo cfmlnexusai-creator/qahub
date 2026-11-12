@@ -6,7 +6,8 @@ import {
 } from '../components/ui.js';
 import { confirmDialog, formDialog } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
-import { canEditCase } from '../visibility.js';
+import { canEditCase, canClaimCase } from '../visibility.js';
+import { toggleModuleSharing } from './modules.js';
 
 const COLUMNS = [
   { key: 'caseKey', label: 'Key', sort: (c) => c.caseKey, always: true },
@@ -76,9 +77,10 @@ export function render(ctx) {
     toast(`Exported ${plural(rows.length, 'case')} to CSV`);
   };
   root.append(pageHead({
-    title: store.actor()?.role !== 'Admin' ? 'My assigned test cases' : mod ? `${mod.name}${feat ? ` / ${feat.name}` : ''}` : 'Test Case Library',
+    title: mod ? `${mod.name}${feat ? ` / ${feat.name}` : ''}` : store.actor()?.role !== 'Admin' ? 'My & shared test cases' : 'Test Case Library',
     subtitle: mod?.description || 'Search, filter and manage documented test cases.',
     actions: [
+      mod && store.can('module.share') && h('button', { type: 'button', class: 'btn', disabled: mod.archived && !mod.sharedWithTeam, onClick: () => toggleModuleSharing(store, mod) }, mod.sharedWithTeam ? 'Stop sharing' : 'Share with everyone'),
       h('button', { type: 'button', class: 'btn', onClick: exportCsv }, icon('data', 16), 'Export CSV'),
       store.can('case.create') && h('a', { class: 'btn btn-primary', href: `#/cases/new${state.f.module ? `?module=${state.f.module}${state.f.feature ? `&feature=${state.f.feature}` : ''}` : ''}` }, icon('plus', 16), 'New case'),
     ],
@@ -301,6 +303,7 @@ export function render(ctx) {
     const canEdit = canEditCase(store, c);
     return menu(null, [
       { label: 'Open', icon: 'file', onClick: () => router.go(`/cases/${c.id}`) },
+      canClaimCase(store, c) && { label: 'Assign to me', icon: 'user', onClick: () => store.claimCase(c.id).then(() => toast(`${c.caseKey} assigned to you`)).catch(toastError) },
       canEdit && { label: 'Edit', icon: 'edit', onClick: () => router.go(`/cases/${c.id}/edit`) },
       store.can('case.create') && { label: 'Duplicate', icon: 'copy', onClick: () => router.go('/cases/new', { from: c.id }) },
       canEdit && 'sep',
@@ -380,6 +383,10 @@ export function render(ctx) {
         h('td', { class: 'col-check' }, check),
         cols.map((col) => cell(c, col.key)),
         h('td', { class: 'col-actions' }, h('div', { class: 'row-actions' },
+          canClaimCase(store, c) && h('button', { type: 'button', class: 'btn btn-sm', 'aria-label': `Assign ${c.caseKey} to me`, onClick: async (event) => {
+            const button = event.currentTarget; button.disabled = true;
+            try { await store.claimCase(c.id); toast(`${c.caseKey} assigned to you`); } catch (error) { toastError(error); } finally { button.disabled = false; }
+          } }, 'Assign to me'),
           canEditCase(store, c) && h('a', { class: 'btn btn-ghost btn-icon btn-sm', href: `#/cases/${c.id}/edit`, 'aria-label': `Edit ${c.caseKey}`, title: 'Edit' }, icon('edit', 15)),
           rowMenu(c))));
     }));

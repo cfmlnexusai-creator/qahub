@@ -81,7 +81,7 @@ function trendChart(activity) {
 export function render({ store, root, setCrumbs }) {
   setCrumbs([{ label: 'Dashboard' }]);
   const me = store.actor();
-  const all = store.data.testCases;
+  const all = store.data.testCases.filter(c => isAdmin(store) || c.assignedTo === me?.id || c.createdBy === me?.id);
   const active = all.filter((c) => !c.deletedAt);
   const live = active.filter((c) => c.status !== 'Deprecated');
   const byStatus = countBy(active, (c) => c.status);
@@ -91,6 +91,9 @@ export function render({ store, root, setCrumbs }) {
     title: isAdmin(store) ? store.meta.project.name : 'My testing workspace',
     subtitle: !isAdmin(store) ? 'Cases assigned to you or created by you. You can edit and delete only your own cases.' : `Shared test cases across ${store.data.modules.filter((m) => !m.archived).length} modules. Progress refreshes every 15 seconds.`,
   }));
+  if (!isAdmin(store) && store.data.modules.some(m => m.sharedWithTeam && !m.archived)) {
+    root.append(banner('info', [h('span', null, 'Shared modules are available. Claim an unassigned case to add it to your workload.'), h('a', { href: '#/modules' }, 'Browse shared modules')]));
+  }
 
   if (active.some((c) => c.demo)) {
     root.append(h('div', { style: { marginBottom: '16px' } }, banner('warn', [

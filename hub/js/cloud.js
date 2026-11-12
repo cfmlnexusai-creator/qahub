@@ -41,7 +41,7 @@ export async function cloudLogin({ username, password, remember }) {
 }
 const MUTATIONS = new Set(['createCase', 'updateCase', 'softDeleteCases', 'restoreCase', 'purgeCase', 'reviewCase',
   'bulkUpdateCases', 'saveModule', 'saveFeature', 'setArchived', 'saveMember', 'saveLabel', 'deleteLabel',
-  'updateProject', 'markExported', 'clearDemoData', 'applyImport']);
+  'updateProject', 'markExported', 'clearDemoData', 'applyImport', 'setModuleShared', 'claimCase']);
 export async function createCloudStore() {
   let snapshot = await request('state');
   const drafts = new Map();

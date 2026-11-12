@@ -1,9 +1,14 @@
 // Shared by the UI and authenticated Node API.
 export const isAdmin = (store) => store.actor()?.active !== false && store.actor()?.role === 'Admin';
 export const canEditCase = (store, record) => Boolean(record && store.can('case.edit') && (isAdmin(store) || record.createdBy === store.actor()?.id));
+export const canClaimCase = (store, record) => {
+  const module = record && store.get('modules', record.moduleId);
+  return Boolean(record && store.can('case.claim') && !record.assignedTo && !record.deletedAt && record.status !== 'Deprecated' && module?.sharedWithTeam && !module.archived);
+};
 
 export function assignedStore(store) {
-  const visible = (c) => !!c && !!store.actor() && store.actor().active !== false && (isAdmin(store) || c.assignedTo === store.actor().id || c.createdBy === store.actor().id);
+  const visible = (c) => !!c && !!store.actor() && store.actor().active !== false && (isAdmin(store) || c.assignedTo === store.actor().id || c.createdBy === store.actor().id || (!c.deletedAt && targetModuleShared(c)));
+  const targetModuleShared = c => { const module = store.get('modules', c.moduleId); return module?.sharedWithTeam && !module.archived; };
   return new Proxy(store, {
     get(target, key) {
       if (key === 'data') {
@@ -21,7 +26,7 @@ export function assignedStore(store) {
       if (key === 'activeCases') return () => target.activeCases().filter(visible);
       if (key === 'can') return (permission) => {
         if (permission === 'case.create') return target.can('case.edit');
-        if (!isAdmin(store) && !['case.edit', 'case.bulk'].includes(permission)) return false;
+        if (!isAdmin(store) && !['case.edit', 'case.bulk', 'case.claim'].includes(permission)) return false;
         return target.can(permission);
       };
       if (['updateCase', 'softDeleteCases', 'bulkUpdateCases', 'reviewCase', 'restoreCase', 'purgeCase'].includes(key)) {

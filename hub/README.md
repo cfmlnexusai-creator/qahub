@@ -13,3 +13,5 @@ The **Page checks** section contains 100 Patient Manager navigation and page-vis
 Regenerate the artifacts with `npm run cases:build`. Preview additions with `npm run cases:publish`, then publish new records with `npm run cases:publish -- --apply`. Publishing never overwrites existing cases, assignments, completion or roles.
 
 Real sign-in requires configured Supabase credentials and linked Auth accounts. Tests use fixtures and a mocked backend.
+
+Admins can use **Share with everyone** on a module card or filtered module case list. Everyone can then browse that module under **Modules & Features** and select **Assign to me** on an unassigned case. Existing assignments cannot be taken over. **Stop sharing** ends team-wide visibility and new claims, while creators and existing assignees keep access. Claiming does not change the case creator or grant edit/delete rights to someone else's case. Personal dashboard progress excludes other members' shared work.
