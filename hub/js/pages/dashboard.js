@@ -89,7 +89,7 @@ export function render({ store, root, setCrumbs }) {
 
   root.append(pageHead({
     title: isAdmin(store) ? store.meta.project.name : 'My testing workspace',
-    subtitle: !isAdmin(store) ? 'Only your assigned test cases. Track pending work and completed execution here.' : `Shared test cases across ${store.data.modules.filter((m) => !m.archived).length} modules. Progress refreshes every 15 seconds.`,
+    subtitle: !isAdmin(store) ? 'Cases assigned to you or created by you. You can edit and delete only your own cases.' : `Shared test cases across ${store.data.modules.filter((m) => !m.archived).length} modules. Progress refreshes every 15 seconds.`,
   }));
 
   if (active.some((c) => c.demo)) {

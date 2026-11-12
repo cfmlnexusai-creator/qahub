@@ -2,6 +2,7 @@ import { h, icon, clone, isEqual, debounce, fmtRelative } from '../utils.js';
 import { PRIORITIES, COMPLETION_STATUSES, CASE_STATUSES, TEST_LEVELS, AUTOMATION_STATUSES, RISKS, CASE_CONTENT_FIELDS, blankCase, normalizeCase, LIMITS } from '../schema.js';
 import { card, field, fieldError, select, showErrors, banner, emptyState } from '../components/ui.js';
 import { toast, toastError } from '../components/toast.js';
+import { canEditCase } from '../visibility.js';
 
 // The editor manages its own state; a store change from another tab must not wipe inputs.
 export const keepAliveOnChange = true;
@@ -28,6 +29,11 @@ export function render(ctx) {
     root.append(card({ body: emptyState({ iconName: 'alert', title: existing ? 'This case is in the trash' : 'Case not found', text: existing ? 'Restore it before editing.' : '', action: h('a', { class: 'btn', href: existing ? `#/cases/${existing.id}` : '#/cases' }, 'Back') }) }));
     return;
   }
+  if (existing && !canEditCase(store, existing)) {
+    setCrumbs([{ label: 'Test Cases', href: '#/cases' }, { label: existing.caseKey }]);
+    root.append(banner('warn', 'You can edit only test cases you created. Assigned cases created by someone else are read-only.'));
+    return;
+  }
 
   // ---- initial model ----
   let initial;
@@ -42,6 +48,7 @@ export function render(ctx) {
     if (query.feature && store.get('features', query.feature)?.moduleId === initial.moduleId) initial.featureId = query.feature;
     if (!initial.moduleId && mods.length === 1) initial.moduleId = mods[0].id;
   }
+  if (!existing && !store.can('case.assign')) initial.assignedTo = store.actor().id;
   if (!initial.steps.length) initial.steps = [{ action: '', expected: '' }];
   let model = clone(initial);
   const draftKey = existing ? `case:${existing.id}` : source ? `case:new:from:${source.id}` : 'case:new';

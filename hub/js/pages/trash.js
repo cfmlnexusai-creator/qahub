@@ -2,6 +2,7 @@ import { h, icon, fmtDate, fmtRelative, plural } from '../utils.js';
 import { pageHead, card, emptyState, person, banner, lookups } from '../components/ui.js';
 import { confirmDialog } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
+import { canEditCase } from '../visibility.js';
 
 export function render({ store, root, setCrumbs }) {
   setCrumbs([{ label: 'Trash' }]);
@@ -44,7 +45,7 @@ export function render({ store, root, setCrumbs }) {
           h('td', { 'data-label': 'By' }, person(store.get('members', c.deletedBy), { fallback: 'Unknown' })),
           h('td', { 'data-label': 'Reason', class: 'small' }, c.deletionReason || h('span', { class: 'muted' }, '—')),
           h('td', { class: 'col-actions' }, h('div', { class: 'row', style: { flexWrap: 'nowrap', justifyContent: 'flex-end' } },
-            canRestore && h('button', { type: 'button', class: 'btn btn-sm', onClick: () => restore(c) }, icon('restore', 14), 'Restore'),
+            canRestore && canEditCase(store, c) && h('button', { type: 'button', class: 'btn btn-sm', onClick: () => restore(c) }, icon('restore', 14), 'Restore'),
             canPurge && h('button', { type: 'button', class: 'btn btn-sm btn-ghost', style: { color: 'var(--danger)' }, onClick: () => purge(c) }, 'Delete forever')))))))),
     }));
   }

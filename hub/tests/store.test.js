@@ -109,16 +109,16 @@ test('only an Admin assigns cases', async () => {
   const { store } = await freshStore();
   store.setActor('mbr-dev-d'); // Contributor
   const c = await store.createCase(baseCase({ assignedTo: 'mbr-dev-d' }));
-  assert.equal(c.assignedTo, '', 'contributor cannot self-assign on create');
+  assert.equal(c.assignedTo, 'mbr-dev-d', 'new Contributor cases are automatically assigned to their creator');
   const u = await store.updateCase(c.id, { ...c, assignedTo: 'mbr-dev-e', title: 'Login rejects wrong password (v2)' });
-  assert.equal(u.assignedTo, '', 'contributor cannot re-assign on edit');
+  assert.equal(u.assignedTo, 'mbr-dev-d', 'contributor cannot re-assign on edit');
   await assert.rejects(store.bulkUpdateCases([c.id], { assignedTo: 'mbr-dev-d' }), PermissionError);
   store.setActor('mbr-dev-a'); // Admin
-  assert.equal(await store.bulkUpdateCases([c.id], { assignedTo: 'mbr-dev-d' }), 1);
-  assert.equal(store.get('testCases', c.id).assignedTo, 'mbr-dev-d');
+  assert.equal(await store.bulkUpdateCases([c.id], { assignedTo: 'mbr-dev-e' }), 1);
+  assert.equal(store.get('testCases', c.id).assignedTo, 'mbr-dev-e');
   store.setActor('mbr-dev-d');
   const kept = await store.updateCase(c.id, { ...store.get('testCases', c.id), title: 'Login rejects wrong password (v3)' });
-  assert.equal(kept.assignedTo, 'mbr-dev-d', 'edit by contributor keeps the Admin assignment');
+  assert.equal(kept.assignedTo, 'mbr-dev-e', 'edit by contributor keeps the Admin assignment');
 });
 
 test('bulk update records per-case history', async () => {

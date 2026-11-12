@@ -6,6 +6,7 @@ import {
 } from '../components/ui.js';
 import { confirmDialog, formDialog } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
+import { canEditCase } from '../visibility.js';
 
 const COLUMNS = [
   { key: 'caseKey', label: 'Key', sort: (c) => c.caseKey, always: true },
@@ -52,7 +53,6 @@ export function filterCases(store, f) {
 export function render(ctx) {
   const { store, root, setCrumbs, router } = ctx;
   const look = lookups(store);
-  const canEdit = store.can('case.edit');
   const canBulk = store.can('case.bulk');
   const state = {
     f: Object.fromEntries(FILTER_KEYS.map((k) => [k, ctx.query[k] || ''])),
@@ -220,19 +220,21 @@ export function render(ctx) {
     bulkbar.hidden = !selected.size;
     if (!selected.size) return bulkbar.replaceChildren();
     const ids = [...selected];
+    const editableSelection = canBulk && ids.every(id => canEditCase(store, store.get('testCases', id)));
     bulkbar.replaceChildren(...[
       h('span', null, `${plural(ids.length, 'case')} selected`),
       h('button', { type: 'button', class: 'btn-link small', onClick: () => { visibleIds.forEach((id) => selected.add(id)); update(); } }, 'Select page'),
       h('button', { type: 'button', class: 'btn-link small', onClick: () => { filterCases(store, state.f).forEach((c) => selected.add(c.id)); update(); } }, 'Select all matching'),
       h('span', { class: 'spacer' }),
-      canBulk && h('button', { type: 'button', class: 'btn btn-sm', onClick: () => bulkEdit(ids) }, icon('edit', 15), 'Bulk edit'),
+      editableSelection && h('button', { type: 'button', class: 'btn btn-sm', onClick: () => bulkEdit(ids) }, icon('edit', 15), 'Bulk edit'),
+      canBulk && !editableSelection && h('span', { class: 'muted small' }, 'Select only cases you created to edit or delete.'),
       h('button', {
         type: 'button', class: 'btn btn-sm', onClick: () => {
           const rows = sortCases(store.activeCases().filter((c) => selected.has(c.id)));
           downloadFile(`qa-hub-selected-${new Date().toISOString().slice(0, 10)}.csv`, casesToCsv(rows, look), 'text/csv');
         },
       }, 'CSV'),
-      canBulk && h('button', { type: 'button', class: 'btn btn-sm', onClick: () => bulkDelete(ids) }, icon('trash', 15), 'Move to trash'),
+      editableSelection && h('button', { type: 'button', class: 'btn btn-sm', onClick: () => bulkDelete(ids) }, icon('trash', 15), 'Move to trash'),
       h('button', { type: 'button', class: 'btn btn-ghost btn-sm', onClick: () => { selected.clear(); update(); } }, 'Clear'),
     ].filter(Boolean));
   }
@@ -296,6 +298,7 @@ export function render(ctx) {
   }
 
   function rowMenu(c) {
+    const canEdit = canEditCase(store, c);
     return menu(null, [
       { label: 'Open', icon: 'file', onClick: () => router.go(`/cases/${c.id}`) },
       canEdit && { label: 'Edit', icon: 'edit', onClick: () => router.go(`/cases/${c.id}/edit`) },
@@ -377,7 +380,7 @@ export function render(ctx) {
         h('td', { class: 'col-check' }, check),
         cols.map((col) => cell(c, col.key)),
         h('td', { class: 'col-actions' }, h('div', { class: 'row-actions' },
-          canEdit && h('a', { class: 'btn btn-ghost btn-icon btn-sm', href: `#/cases/${c.id}/edit`, 'aria-label': `Edit ${c.caseKey}`, title: 'Edit' }, icon('edit', 15)),
+          canEditCase(store, c) && h('a', { class: 'btn btn-ghost btn-icon btn-sm', href: `#/cases/${c.id}/edit`, 'aria-label': `Edit ${c.caseKey}`, title: 'Edit' }, icon('edit', 15)),
           rowMenu(c))));
     }));
     tableWrap.replaceChildren(h('table', { class: 'table cards' }, h('caption', { class: 'sr-only' }, 'Test cases'), thead, tbody));

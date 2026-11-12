@@ -232,7 +232,7 @@ export function createStore(persistence) {
     const me = requireActor('case.edit');
     const now = nowIso();
     const content = cleanCaseInput(input);
-    if (!can('case.assign', me)) content.assignedTo = ''; // only an Admin assigns work
+    if (!can('case.assign', me)) content.assignedTo = me.id; // Contributors own and receive their new cases; only Admins can reassign.
     const draft = normalizeCase({ ...content, id: uuid(), caseKey: String(input.caseKey || '').trim().toUpperCase() });
     if (draft.status === 'Approved' && !can('case.review', me)) {
       throw new ValidationError({ status: 'Only Maintainers/Admins can mark a case Approved. Use "Ready for Review".' });

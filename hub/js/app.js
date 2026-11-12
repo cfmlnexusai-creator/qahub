@@ -29,6 +29,7 @@ const NAV = [
   { section: 'Workspace' },
   { href: '#/dashboard', label: 'Dashboard', icon: 'dashboard', match: /^\/dashboard/ },
   { href: '#/cases', label: 'Test Cases', icon: 'cases', match: /^\/cases/, count: (s) => s.activeCases().length },
+  { href: '#/cases?module=mod-navigation-page-checks', label: 'Page checks', icon: 'cases', match: /^\/cases/, moduleId: 'mod-navigation-page-checks', show: s => Boolean(s.get('modules', 'mod-navigation-page-checks')), count: s => s.activeCases().filter(c => c.moduleId === 'mod-navigation-page-checks').length },
   { href: '#/modules', label: 'Modules & Features', icon: 'modules', match: /^\/modules/ },
   { href: '#/suites', label: 'Test Suites', icon: 'suites', match: /^\/suites/ },
   { section: 'Records' },
@@ -173,17 +174,18 @@ function toggleTheme() {
 function renderChrome() {
   const path = router?.current?.path || '';
   const visibleStore = assignedStore(store);
-  shell.nav.replaceChildren(...NAV.filter((n) => (isAdmin(store) || n.section === 'Workspace' || ['#/dashboard', '#/cases'].includes(n.href)) && (!n.show || n.show(visibleStore))).map((n) => {
+  shell.nav.replaceChildren(...NAV.filter((n) => (isAdmin(store) || n.section === 'Workspace' || n.moduleId || ['#/dashboard', '#/cases', '#/trash'].includes(n.href)) && (!n.show || n.show(visibleStore))).map((n) => {
     if (n.section) return h('div', { class: 'nav-section' }, n.section);
     const count = n.count ? n.count(visibleStore) : '';
-    return h('a', { href: n.href, 'aria-current': n.match.test(path) ? 'page' : undefined, title: n.label },
+    const sectionActive = n.moduleId ? router.current?.query.module === n.moduleId : n.href !== '#/cases' || router.current?.query.module !== 'mod-navigation-page-checks';
+    return h('a', { href: n.href, 'aria-current': n.match.test(path) && sectionActive ? 'page' : undefined, title: n.label },
       icon(n.icon), h('span', { class: 'nav-label' }, n.label), count !== '' ? h('span', { class: 'count' }, String(count)) : null);
   }));
   shell.project.textContent = store.meta.project.name;
   document.title = `QA Hub · ${store.meta.project.name}`;
   shell.unexported.hidden = !store.hasUnexportedChanges();
   const me = store.actor();
-  shell.newBtn.hidden = !isAdmin(store) || !store.can('case.edit');
+  shell.newBtn.hidden = !visibleStore.can('case.create');
   shell.unexported.hidden = !isAdmin(store) || !store.hasUnexportedChanges();
   const dark = document.documentElement.dataset.theme === 'dark';
   shell.themeBtn.replaceChildren(icon(dark ? 'sun' : 'moon'));
@@ -214,7 +216,7 @@ function renderPage(current, { keepScroll = false } = {}) {
   currentPage = page;
   clear(shell.content);
   renderChrome();
-  if (!isAdmin(store) && (![dashboard, cases, caseDetail, caseEditor].includes(page) || (page === caseEditor && (!current.params.id || current.query.from)))) {
+  if (!isAdmin(store) && ![dashboard, cases, caseDetail, caseEditor, trash].includes(page)) {
     shell.content.append(banner('warn', [h('strong', null, 'This page is available to administrators only.'), h('a', { href: '#/cases' }, 'View my assigned cases')]));
     return;
   }

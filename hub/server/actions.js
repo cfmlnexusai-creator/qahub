@@ -4,16 +4,17 @@ export const ACTIONS = new Set([
   'saveModule', 'saveFeature', 'setArchived', 'saveMember', 'saveLabel', 'deleteLabel', 'updateProject',
   'markExported', 'clearDemoData', 'applyImport',
 ]);
-const CONTRIBUTOR_ACTIONS = new Set(['updateCase', 'softDeleteCases', 'bulkUpdateCases']);
+const CONTRIBUTOR_ACTIONS = new Set(['createCase', 'updateCase', 'softDeleteCases', 'bulkUpdateCases', 'restoreCase', 'reviewCase']);
 export async function executeAction(store, action, args) {
   if (!ACTIONS.has(action) || !Array.isArray(args)) throw Object.assign(new Error('Unsupported action.'), { status: 400 });
   if (!isAdmin(store) && !CONTRIBUTOR_ACTIONS.has(action)) throw Object.assign(new Error('Administrator access required.'), { status: 403 });
-  if (!isAdmin(store)) {
-    const ids = action === 'updateCase' ? [args[0]] : args[0];
+  if (!isAdmin(store) && action !== 'createCase') {
+    const ids = ['updateCase', 'restoreCase', 'reviewCase'].includes(action) ? [args[0]] : args[0];
     if (!Array.isArray(ids)) throw Object.assign(new Error('Case IDs are required.'), { status: 400 });
-    if (!ids.every(id => store.get('testCases', id)?.assignedTo === store.actor().id)) {
-      throw Object.assign(new Error('You can only change cases assigned to you.'), { status: 403 });
+    if (!ids.every(id => store.get('testCases', id)?.createdBy === store.actor().id)) {
+      throw Object.assign(new Error('You can only change test cases you created.'), { status: 403 });
     }
+    if (action === 'reviewCase' && args[1] !== 'submit') throw Object.assign(new Error('Administrator review required.'), { status: 403 });
   }
   // No client-controlled self-service profile creation or identity switching.
   if (action === 'saveMember') args = [args[0]];

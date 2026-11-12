@@ -5,6 +5,7 @@ import {
 import { timeline } from '../components/timeline.js';
 import { confirmDialog } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
+import { canEditCase } from '../visibility.js';
 
 export function render({ store, root, params, setCrumbs, router }) {
   const c = store.get('testCases', params.id);
@@ -29,7 +30,7 @@ export function render({ store, root, params, setCrumbs, router }) {
     { label: c.caseKey },
   ]);
 
-  const canEdit = store.can('case.edit') && !c.deletedAt;
+  const canEdit = canEditCase(store, c) && !c.deletedAt;
   const canReview = store.can('case.review');
 
   const review = async (decision) => {
@@ -61,7 +62,7 @@ export function render({ store, root, params, setCrumbs, router }) {
   };
 
   const actions = h('div', { class: 'page-actions' },
-    c.deletedAt && store.can('case.edit') && h('button', { type: 'button', class: 'btn btn-primary', onClick: () => store.restoreCase(c.id).then(() => toast(`${c.caseKey} restored`)).catch(toastError) }, icon('restore', 16), 'Restore'),
+    c.deletedAt && canEditCase(store, c) && h('button', { type: 'button', class: 'btn btn-primary', onClick: () => store.restoreCase(c.id).then(() => toast(`${c.caseKey} restored`)).catch(toastError) }, icon('restore', 16), 'Restore'),
     canEdit && !c.deletedAt && h('button', { type: 'button', class: 'btn btn-primary', onClick: async () => {
       try {
         await store.updateCase(c.id, { completionStatus: c.completionStatus === 'Completed' ? 'Pending' : 'Completed' }, { expectedVersion: c.version });
@@ -75,8 +76,8 @@ export function render({ store, root, params, setCrumbs, router }) {
     store.can('case.edit') && menu(null, [
       store.can('case.create') && { label: 'Duplicate', icon: 'copy', onClick: () => router.go('/cases/new', { from: c.id }) },
       { label: 'Copy link', icon: 'file', onClick: () => navigator.clipboard?.writeText(location.href).then(() => toast('Link copied')).catch(() => toast('Copy failed — use the address bar', { type: 'error' })) },
-      !c.deletedAt && 'sep',
-      !c.deletedAt && { label: 'Move to trash', icon: 'trash', danger: true, onClick: del },
+      canEdit && 'sep',
+      canEdit && { label: 'Move to trash', icon: 'trash', danger: true, onClick: del },
     ], { label: 'More actions' }),
   );
 

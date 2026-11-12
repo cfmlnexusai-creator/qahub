@@ -30,7 +30,9 @@ Enter secret keys in local `.env` and Vercel environment settings. Do not send a
 
 Run the SQL files in `supabase/migrations/` in numeric order in the Supabase SQL editor. The first creates `qa_workspace` (JSONB snapshot with an atomic revision counter) and `qa_identities` (Auth UUID to member ID). The second allows multiple authenticated emails to map to one existing member profile.
 
-RLS is enabled and browser roles have no table privileges. Only the server service-role key accesses these tables. The API verifies tokens against Supabase Auth and checks active membership, role and assignment on every request.
+RLS is enabled and browser roles have no table privileges. Only the server service-role key accesses these tables. The API verifies tokens against Supabase Auth and checks active membership, role and case ownership on every request. Contributors may create cases; they may edit, trash, submit for review or restore only cases they created. Cases assigned to them by an Admin remain visible but are read-only unless they are also the creator. Reassignment does not remove the creator's access. Only Admins can change assignees, approve or permanently delete cases.
+
+The Page checks section adds NAV-001 through NAV-100 in a separate Navigation & Page Checks module with ten features. Source-based manual definitions are in `data/navigation-checks.spec.json`; generated JSON and Markdown can be rebuilt with `npm run cases:build`. Run `npm run cases:publish` for a preview and append `-- --apply` to insert missing records without replacing existing work. A default fresh seed includes both the original library and this module. These definitions have not been executed against Patient Manager.
 
 These migrations preserve the existing document model and history in Postgres JSONB. They support one shared workspace. Migration 003 adds a service-role-only function that applies changed records and metadata atomically with a revision check. Normal saves send only these changes, rather than uploading the entire library. Conflicts require refreshing and retrying. For substantially larger libraries or high write volume, migrate to per-record tables.
 

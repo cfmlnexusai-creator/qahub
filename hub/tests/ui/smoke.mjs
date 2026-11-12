@@ -106,6 +106,8 @@ async function reloadPage() {
 
 async function main() {
   const doc = JSON.parse(readFileSync(appPath('data/library.json'), 'utf8'));
+  const navigation = JSON.parse(readFileSync(appPath('data/modules/navigation-page-checks.json'), 'utf8'));
+  for (const name of ['modules', 'features', 'testCases']) doc[name].push(...navigation[name]);
   const backend = createStore(createMemoryPersistence({ collections: doc, meta: { project: doc.project, seededAt: new Date().toISOString() } }));
   await backend.init({ seed: false });
   backend.setActor('mbr-gunanidhi');
@@ -134,7 +136,11 @@ async function main() {
           await new Promise(resolve => { releaseRefresh = resolve; });
         }
         let value;
-        if (path === '/api/login') value = { access_token: 'mock-token', expires_in: 3600 };
+        if (path === '/api/login') {
+          const login = JSON.parse(req.postData);
+          backend.setActor(login.email === 'contributor@example.test' ? 'mbr-sujitha' : 'mbr-gunanidhi');
+          value = { access_token: 'mock-token', expires_in: 3600 };
+        }
         else {
           let result;
           if (path === '/api/action') {
@@ -156,8 +162,12 @@ async function main() {
   await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
   await signIn();
   await waitFor(`document.querySelector('.developer-table')`);
-  assert.equal(await store('s.data.testCases.length'), 3815);
+  assert.equal(await store('s.data.testCases.length'), 3915);
   assert.equal(await store('s.persistenceKind'), 'supabase');
+  await click('a[title="Page checks"]');
+  await waitFor(`document.querySelector('select[name=module]')?.value === 'mod-navigation-page-checks' || location.hash.includes('mod-navigation-page-checks')`);
+  assert.equal(await store(`s.activeCases().filter(c => c.moduleId === 'mod-navigation-page-checks').length`), 100);
+  await go('#/dashboard');
   await shot('01-cloud-dashboard');
   const tc = backend.activeCases()[0];
   step = 'save completion';
@@ -188,8 +198,50 @@ async function main() {
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert.ok(await evaluate('document.documentElement.scrollWidth - innerWidth <= 1'));
   await shot('02-cloud-mobile');
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  step = 'Contributor login';
+  await backend.bulkUpdateCases([tc.id], { assignedTo: 'mbr-sujitha' }); revision++;
+  await evaluate(`sessionStorage.removeItem('qa-hub-cloud-session'); localStorage.removeItem('qa-hub-cloud-session'); true`);
+  await reloadPage();
+  await waitFor(`!window.__stalePage && document.querySelector('#login-user')`);
+  await setValue('#login-user', 'contributor@example.test');
+  await setValue('#login-pass', TEST_PASS);
+  await evaluate(`document.querySelector('.login-form').requestSubmit()`);
+  await waitFor(`window.qaHub?.store.actor()?.id === 'mbr-sujitha' && document.querySelector('.topbar')`);
+  step = 'Contributor assigned case is read-only';
+  await go('#/cases/' + tc.id);
+  await waitFor(`document.querySelector('.steps-view')`);
+  assert.equal(await evaluate(`!!document.querySelector('main a[href$="/edit"]')`), false);
+  assert.equal(await evaluate(`[...document.querySelectorAll('main button')].some(b => b.textContent.includes('Mark completed') || b.textContent.includes('Reopen case'))`), false);
+  await go('#/cases/' + tc.id + '/edit');
+  await waitFor(`document.querySelector('main').textContent.includes('only test cases you created')`);
+  step = 'Contributor creates own case';
+  await go('#/cases/new');
+  await fillCase({ title: 'Contributor-owned navigation test', moduleId: navigation.modules[0].id, featureId: navigation.features[0].id, objective: 'Check a visible patient page.', steps: [['Open the synthetic page', 'The expected section is visible']] });
+  await click('form .editor-actions button[type=submit]');
+  await waitFor(`/^#\\/cases\\/[0-9a-f-]{36}$/.test(location.hash)`);
+  const ownId = await evaluate(`location.hash.split('/')[2]`);
+  assert.equal(backend.get('testCases', ownId).createdBy, 'mbr-sujitha');
+  assert.equal(backend.get('testCases', ownId).assignedTo, 'mbr-sujitha');
+  step = 'Contributor edits own case';
+  await go('#/cases/' + ownId + '/edit');
+  await waitFor(`document.querySelector('input[name=title]')`);
+  await setValue('input[name=title]', 'Contributor-owned navigation test updated');
+  await click('form .editor-actions button[type=submit]');
+  await waitFor(`location.hash === '#/cases/${ownId}' && document.querySelector('.steps-view')`);
+  assert.equal(backend.get('testCases', ownId).version, 2);
+  step = 'Contributor deletes own case';
+  await click('[aria-label="More actions"]');
+  await clickText('[role="menuitem"]', 'Move to trash');
+  await waitFor(`document.querySelector('dialog[open] textarea')`);
+  await setValue('dialog[open] textarea', 'Own case smoke test');
+  await clickText('dialog[open] button', 'Move to trash');
+  await waitFor(`window.qaHub.store.get('testCases','${ownId}').deletedAt`);
+  await go('#/trash');
+  await waitFor(`document.querySelector('main').textContent.includes('Contributor-owned navigation test updated')`);
+  assert.equal(await evaluate(`document.querySelector('main').textContent.includes('Delete forever')`), false);
   assert.deepEqual(errors, []);
-  console.log('Cloud UI smoke passed: login, 3815 cases, save, reload, admin pages and mobile. Backend mocked; HTTP API tested separately.');
+  console.log('Cloud UI smoke passed: 3915 cases, Page checks section, sync/save, Admin pages/mobile, Contributor create/edit/delete, assigned case read-only.');
 }
 main()
   .catch((e) => { console.error(`FAILED at step "${step}":`, e.message); if (errors.length) console.error(errors.join('\n')); process.exitCode = 1; })

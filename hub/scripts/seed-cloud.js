@@ -4,6 +4,10 @@ import { COLLECTIONS } from '../js/schema.js';
 import { computeKeyCounters } from '../js/import-export.js';
 const file = process.argv[2] || new URL('../data/library.json', import.meta.url);
 const doc = JSON.parse(await readFile(file, 'utf8'));
+if (!process.argv[2]) {
+  const navigation = JSON.parse(await readFile(new URL('../data/modules/navigation-page-checks.json', import.meta.url), 'utf8'));
+  for (const name of ['modules', 'features', 'testCases']) doc[name].push(...navigation[name]);
+}
 if (!Array.isArray(doc.members) || !Array.isArray(doc.testCases) || doc.schemaVersion !== 1) throw new Error('Expected a QA Hub version 1 JSON export.');
 const existing = await supabase('/rest/v1/qa_workspace?id=eq.default&select=id');
 if (existing.length) throw new Error('Workspace already exists. Seeding refuses to overwrite shared work.');
