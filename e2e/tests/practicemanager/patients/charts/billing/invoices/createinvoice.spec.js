@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { PATIENT, INVOICE } = require('../../../../../fixtures/testdata');
 const path = require('path');
 
 test('Create Billing for patient @regression', async ({ page }) => {
