@@ -81,12 +81,10 @@ const setValue = (sel, value) => evaluate(`(() => { const el = document.querySel
 const go = async (hash) => { await evaluate(`location.hash = ${JSON.stringify(hash)}`); await sleep(120); };
 const store = (expr) => evaluate(`(() => { const s = window.qaHub.store; return ${expr}; })()`);
 
-async function fillCase({ title, moduleId, featureId, objective, steps }) {
+async function fillCase({ title, moduleId, steps }) {
   await waitFor(`document.querySelector('input[name=title]')`);
   await setValue('input[name=title]', title);
   await setValue('select[name=moduleId]', moduleId);
-  if (featureId) await setValue('select[name=featureId]', featureId);
-  await setValue('textarea[name=objective]', objective);
   await setValue('textarea[aria-label="Step 1 action"]', steps[0][0]);
   await setValue('textarea[aria-label="Step 1 expected result"]', steps[0][1]);
 }
@@ -216,6 +214,9 @@ async function main() {
   await clickText('dialog[open] .modal-foot button', 'Share with everyone');
   await waitFor(`window.qaHub.store.get('modules','mod-navigation-page-checks').sharedWithTeam === true`);
   step = 'Contributor login';
+  const ownedModule = await backend.saveModule({ name: 'Assigned empty module', keyPrefix: 'EMPTYOWN', ownerId: 'mbr-sujitha' });
+  const privateModule = await backend.saveModule({ name: 'Unassigned empty module', keyPrefix: 'EMPTYOTHER' });
+  assert.equal(backend.activeCases().filter(c => c.moduleId === ownedModule.id).length, 0);
   await backend.bulkUpdateCases([tc.id], { assignedTo: 'mbr-sujitha' }); revision++;
   await evaluate(`sessionStorage.removeItem('qa-hub-cloud-session'); localStorage.removeItem('qa-hub-cloud-session'); true`);
   await reloadPage();
@@ -227,6 +228,9 @@ async function main() {
   step = 'Contributor browses shared module and self-assigns';
   await go('#/modules');
   await waitFor(`document.querySelector('main').textContent.includes('Shared with everyone')`);
+  assert.equal(await store(`s.get('modules', '${privateModule.id}').name`), privateModule.name);
+  assert.equal(await evaluate(`document.querySelector('main').textContent.includes('${ownedModule.name}')`), true);
+  assert.equal(await evaluate(`document.querySelector('main').textContent.includes('${privateModule.name}')`), false);
   assert.equal(await evaluate(`[...document.querySelectorAll('main button')].some(b => b.textContent === 'Stop sharing')`), false);
   const sharedCase = navigation.testCases[0];
   await go('#/cases/' + sharedCase.id);
@@ -252,7 +256,9 @@ async function main() {
   await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}))`);
   step = 'Contributor creates own case';
   await go('#/cases/new');
-  await fillCase({ title: 'Contributor-owned navigation test', moduleId: navigation.modules[0].id, featureId: navigation.features[0].id, objective: 'Check a visible patient page.', steps: [['Open the synthetic page', 'The expected section is visible']] });
+  await fillCase({ title: 'Contributor-owned navigation test', moduleId: navigation.modules[0].id, steps: [['Open the synthetic page', 'The expected section is visible']] });
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('form [name]')].map(el => el.name)`),
+    ['title', 'moduleId', 'completionStatus', 'assignedTo']);
   await click('form .editor-actions button[type=submit]');
   await waitFor(`/^#\\/cases\\/[0-9a-f-]{36}$/.test(location.hash)`);
   const ownId = await evaluate(`location.hash.split('/')[2]`);

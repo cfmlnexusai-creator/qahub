@@ -18,6 +18,7 @@ export function render(ctx) {
   const isEdit = Boolean(params.id);
   const existing = isEdit ? store.get('testCases', params.id) : null;
   const source = !isEdit && query.from ? store.get('testCases', query.from) : null;
+  const simple = !isEdit && !source;
 
   if (!store.can('case.edit')) {
     setCrumbs([{ label: 'Test Cases', href: '#/cases' }, { label: isEdit ? 'Edit' : 'New case' }]);
@@ -128,6 +129,11 @@ export function render(ctx) {
   const canApprove = store.can('case.review');
   const statusOpts = CASE_STATUSES.filter((s) => s !== 'Approved' || canApprove || initial.status === 'Approved');
   const members = store.data.members.filter((m) => m.active !== false || m.id === model.assignedTo);
+  const assigneeField = field({
+    label: 'Assignee',
+    input: Object.assign(pick('assignedTo', [{ value: '', label: 'Unassigned' }, ...members.map((m) => ({ value: m.id, label: `${m.displayName} (${m.role})` }))]), { disabled: !store.can('case.assign') }),
+    name: 'assignedTo',
+  });
 
   // ---- steps editor ----
   const stepsWrap = h('div', { class: 'steps-edit' });
@@ -171,7 +177,19 @@ export function render(ctx) {
     h('div', { class: 'card-head' }, h('div', null, h('h2', { id: `${id}-h` }, title), subtitle && h('p', { class: 'muted small' }, subtitle))),
     h('div', { class: 'card-body' }, body));
 
-  form.append(
+  const stepsFields = [
+    stepsWrap,
+    fieldError('steps'),
+    h('button', { type: 'button', class: 'btn btn-sm', onClick: () => addStep() }, icon('plus', 15), 'Add step'),
+  ];
+  if (simple) form.append(card({ body: h('div', { class: 'form-grid' },
+    field({ label: 'Title', input: titleIn, name: 'title', required: true, full: true }),
+    field({ label: 'Module', input: moduleSel, name: 'moduleId', required: true }),
+    field({ label: 'Completion', input: pick('completionStatus', COMPLETION_STATUSES), name: 'completionStatus' }),
+    h('fieldset', { class: 'field full' }, h('legend', null, 'Steps'), ...stepsFields),
+    assigneeField,
+  ) }));
+  else form.append(
     sec('basics', 'Basics', h('div', { class: 'form-grid' },
       field({ label: 'Title', input: titleIn, name: 'title', required: true, full: true, hint: `${LIMITS.titleMin}–${LIMITS.titleMax} characters. Describe the behaviour, not the steps.` }),
       field({ label: 'Module', input: moduleSel, name: 'moduleId', required: true }),
@@ -181,14 +199,12 @@ export function render(ctx) {
       field({ label: 'Completion', input: pick('completionStatus', COMPLETION_STATUSES), name: 'completionStatus', hint: 'Mark Completed after executing this case. Completion does not mean the test passed.' }),
       field({ label: 'Status', input: pick('status', statusOpts), name: 'status', required: true, hint: canApprove ? '' : 'Approval is done by a Maintainer/Admin from the case page.' }),
       field({ label: 'Test level', input: pick('testLevel', TEST_LEVELS), name: 'testLevel' }),
-      field({ label: 'Objective / expected business behaviour', input: area('objective', 2, { placeholder: 'What must be true for the business when this passes?' }), name: 'objective', required: true, full: true }),
+      field({ label: 'Objective / expected business behaviour', input: area('objective', 2, { placeholder: 'What must be true for the business when this passes?' }), name: 'objective', full: true }),
       field({ label: 'Description', input: area('description', 2), name: 'description', full: true }),
       field({ label: 'Preconditions', input: area('preconditions', 2, { placeholder: 'Roles, configuration, existing synthetic records…' }), name: 'preconditions', full: true }),
     )),
     sec('steps', 'Steps', h('div', { class: 'stack', style: { gap: '10px' } },
-      stepsWrap,
-      fieldError('steps'),
-      h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn btn-sm', onClick: () => addStep() }, icon('plus', 15), 'Add step'), h('span', { class: 'muted small' }, 'Tip: Alt+Enter in an expected result adds a step below.')),
+      ...stepsFields,
       field({ label: 'Overall expected result', input: area('expectedResult', 2), name: 'expectedResult', full: true }),
     ), 'One action and its expected result per step.'),
     sec('classification', 'Classification', h('div', { class: 'form-grid' },
@@ -196,12 +212,7 @@ export function render(ctx) {
       field({ label: 'Automation status', input: pick('automationStatus', AUTOMATION_STATUSES), name: 'automationStatus' }),
       field({ label: 'Automation script path', input: text('automationPath', { placeholder: 'tests/e2e/auth/login.spec.js' }), name: 'automationPath', hint: 'Repo-relative path, if automated.' }),
       field({ label: 'Tags', input: listInput('tags', 'comma separated, e.g. login, mfa'), name: 'tags' }),
-      field({
-        label: 'Assignee',
-        input: Object.assign(pick('assignedTo', [{ value: '', label: 'Unassigned' }, ...members.map((m) => ({ value: m.id, label: `${m.displayName} (${m.role})` }))]), { disabled: !store.can('case.assign') }),
-        name: 'assignedTo',
-        hint: store.can('case.assign') ? undefined : 'Only an Admin assigns cases.',
-      }),
+      assigneeField,
       store.data.accounts.length ? h('div', { class: 'field full' }, h('span', { class: 'field-label', id: 'acc-label' }, 'Accounts'), Object.assign(checks('accountIds', store.data.accounts), { 'aria-labelledby': 'acc-label' }), fieldError('accountIds')) : null,
     )),
     sec('references', 'References & test data', h('div', { class: 'form-grid' },
@@ -224,7 +235,7 @@ export function render(ctx) {
   root.append(
     h('div', { class: 'page-head' }, h('div', null,
       h('h1', null, existing ? `Edit ${existing.caseKey}` : source ? `Duplicate ${source.caseKey}` : 'New test case'),
-      h('p', null, existing ? `Version ${existing.version}. Changes are recorded field by field in the case history.` : 'Required fields are marked *. A local draft is kept while you type.'))),
+      existing && h('p', null, `Version ${existing.version}. Changes are recorded field by field in the case history.`))),
     draftBanner, formError, form,
   );
 

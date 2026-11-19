@@ -32,11 +32,8 @@ export function validateCase(tc, ctx) {
     const feature = ctx.features.find((f) => f.id === tc.featureId);
     if (!feature) errors.featureId = 'Selected feature no longer exists.';
     else if (feature.moduleId !== tc.moduleId) errors.featureId = 'Feature does not belong to the selected module.';
-  } else if (module && ctx.features.some((f) => f.moduleId === module.id && !f.archived)) {
-    errors.featureId = 'Choose a feature/operation for this module.';
   }
 
-  if (!str(tc.objective)) errors.objective = 'Describe the objective or expected business behaviour.';
   if (!PRIORITIES.includes(tc.priority)) errors.priority = 'Choose a priority.';
   if (tc.completionStatus !== undefined && !COMPLETION_STATUSES.includes(tc.completionStatus)) errors.completionStatus = 'Choose Pending or Completed.';
   if (!CASE_STATUSES.includes(tc.status)) errors.status = 'Choose a status.';

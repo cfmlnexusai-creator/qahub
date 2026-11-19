@@ -53,7 +53,23 @@ test('validation rejects missing fields and duplicate keys', async () => {
   const { store } = await freshStore();
   await assert.rejects(store.createCase({ title: 'x' }), (e) => e instanceof ValidationError && Boolean(e.errors.title && e.errors.moduleId));
   await assert.rejects(store.createCase(baseCase({ caseKey: 'AUTH-001' })), (e) => e instanceof ValidationError && /already used/.test(e.errors.caseKey));
-  await assert.rejects(store.createCase(baseCase({ featureId: '' })), (e) => Boolean(e.errors.featureId));
+  await assert.rejects(store.createCase(baseCase({ featureId: 'missing' })), (e) => Boolean(e.errors.featureId));
+});
+
+test('a case can be created and updated with only the basic fields', async () => {
+  const { store } = await freshStore();
+  const created = await store.createCase({
+    title: 'Login with a valid account',
+    moduleId: 'mod-authentication',
+    completionStatus: 'Pending',
+    steps: [{ action: 'Sign in', expected: 'Dashboard opens' }],
+    assignedTo: 'mbr-dev-a',
+  });
+  assert.equal(created.featureId, '');
+  assert.equal(created.objective, '');
+  assert.equal(created.caseKey, 'AUTH-002');
+  const updated = await store.updateCase(created.id, { completionStatus: 'Completed' });
+  assert.equal(updated.completionStatus, 'Completed');
 });
 
 test('update bumps version, logs field diff, detects stale edits', async () => {
