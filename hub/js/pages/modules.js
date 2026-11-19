@@ -76,7 +76,14 @@ export function render({ store, root, setCrumbs, router }) {
     actions: [toggle, canEdit && h('button', { type: 'button', class: 'btn btn-primary', onClick: () => moduleDialog(store) }, icon('plus', 16), 'New module')],
   }));
 
-  const mods = store.data.modules.filter((m) => (showArchived || !m.archived) && (isAdmin(store) || m.sharedWithTeam || active.some(c => c.moduleId === m.id))).sort((a, b) => (a.archived - b.archived) || (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
+  const actorId = store.actor()?.id;
+  const admin = isAdmin(store);
+  const modulesWithVisibleCases = new Set(active.map((c) => c.moduleId));
+  const mods = store.data.modules
+    .filter((m) => (showArchived || !m.archived) && (
+      admin || m.sharedWithTeam || (actorId && m.ownerId === actorId) || modulesWithVisibleCases.has(m.id)
+    ))
+    .sort((a, b) => (a.archived - b.archived) || (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name));
   if (!mods.length) {
     root.append(card({ body: emptyState({ iconName: 'modules', title: 'No modules yet', text: 'Add the modules of the application under test, e.g. Patients or Billing.', action: canEdit && h('button', { type: 'button', class: 'btn btn-primary', onClick: () => moduleDialog(store) }, 'New module') }) }));
     return;
