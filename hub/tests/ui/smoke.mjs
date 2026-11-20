@@ -81,6 +81,15 @@ const setValue = (sel, value) => evaluate(`(() => { const el = document.querySel
 const go = async (hash) => { await evaluate(`location.hash = ${JSON.stringify(hash)}`); await sleep(120); };
 const store = (expr) => evaluate(`(() => { const s = window.qaHub.store; return ${expr}; })()`);
 
+async function assertSimpleCaseForm(stepCount = 1) {
+  const steps = Array.from({ length: stepCount }, (_, i) => [
+    `Step ${i + 1} action`, `Step ${i + 1} expected result`,
+  ]).flat();
+  assert.deepEqual(await evaluate(`[...document.querySelectorAll('form input, form select, form textarea')]
+    .map(el => el.name || el.getAttribute('aria-label'))`),
+  ['title', 'moduleId', 'completionStatus', ...steps, 'assignedTo']);
+}
+
 async function fillCase({ title, moduleId, steps }) {
   await waitFor(`document.querySelector('input[name=title]')`);
   await setValue('input[name=title]', title);
@@ -213,6 +222,36 @@ async function main() {
   await waitFor(`document.querySelector('dialog[open]')`);
   await clickText('dialog[open] .modal-foot button', 'Share with everyone');
   await waitFor(`window.qaHub.store.get('modules','mod-navigation-page-checks').sharedWithTeam === true`);
+  step = 'Admin duplicates a case and moves the copy to another module';
+  const source = backend.get('testCases', tc.id);
+  const destination = backend.data.modules.find(m => m.id !== source.moduleId && !m.archived);
+  assert.ok(source.featureId, 'The source has a module-specific feature');
+  await go('#/cases/new?from=' + tc.id);
+  await waitFor(`document.querySelector('input[name=title]')`);
+  await assertSimpleCaseForm(source.steps.length);
+  assert.equal(await evaluate(`document.querySelector('input[name=title]').value`), `Copy of ${source.title}`);
+  assert.equal(await evaluate(`document.querySelector('select[name=completionStatus]').value`), 'Pending');
+  await click('form .editor-actions button[type=submit]');
+  await waitFor(`document.querySelector('.steps-view') && location.hash !== '#/cases/${tc.id}'`);
+  const copyId = await evaluate(`location.hash.split('/')[2]`);
+  const copy = backend.get('testCases', copyId);
+  assert.notEqual(copy.caseKey, source.caseKey);
+  for (const key of ['moduleId', 'featureId', 'steps', 'priority', 'objective', 'tags']) {
+    assert.deepEqual(copy[key], source[key], key);
+  }
+  assert.equal(copy.status, 'Draft');
+
+  await go('#/cases/' + copyId + '/edit');
+  await waitFor(`document.querySelector('select[name=moduleId]')`);
+  await setValue('select[name=moduleId]', destination.id);
+  await click('form .editor-actions button[type=submit]');
+  await waitFor(`location.hash === '#/cases/${copyId}' && document.querySelector('.steps-view')`);
+  const moved = backend.get('testCases', copyId);
+  assert.equal(moved.moduleId, destination.id);
+  assert.equal(moved.featureId, '');
+  assert.equal(moved.caseKey, copy.caseKey);
+  assert.equal(moved.objective, copy.objective);
+
   step = 'Contributor login';
   const ownedModule = await backend.saveModule({ name: 'Assigned empty module', keyPrefix: 'EMPTYOWN', ownerId: 'mbr-sujitha' });
   const privateModule = await backend.saveModule({ name: 'Unassigned empty module', keyPrefix: 'EMPTYOTHER' });
@@ -246,19 +285,30 @@ async function main() {
   assert.equal(await evaluate(`[...document.querySelectorAll('main button')].some(b => b.textContent.includes('Mark completed') || b.textContent.includes('Reopen case'))`), true);
   await go('#/cases/' + tc.id + '/edit');
   await waitFor(`document.querySelector('input[name=title]')`);
+  const beforeEdit = backend.get('testCases', tc.id);
+  await evaluate(`window.qaHub.store.drafts.put('case:${tc.id}', {
+    values: { title: 'Restored legacy draft', priority: 'Low', objective: 'Obsolete draft metadata' },
+    savedAt: new Date().toISOString(), baseVersion: ${beforeEdit.version - 1}
+  })`);
+  await go('#/cases/' + tc.id);
+  await go('#/cases/' + tc.id + '/edit');
+  await waitFor(`document.querySelector('main').textContent.includes('Restore draft')`);
+  await clickText('main button', 'Restore draft');
+  assert.equal(await evaluate(`document.querySelector('input[name=title]').value`), 'Restored legacy draft');
   await setValue('input[name=title]', 'Admin-created case edited by assigned Contributor');
   await click('form .editor-actions button[type=submit]');
   await waitFor(`location.hash === '#/cases/${tc.id}' && document.querySelector('.steps-view')`);
   assert.equal(backend.get('testCases', tc.id).title, 'Admin-created case edited by assigned Contributor');
-  assert.equal(backend.get('testCases', tc.id).createdBy, tc.createdBy);
+  for (const key of ['caseKey', 'createdBy', 'featureId', 'priority', 'objective', 'tags', 'assignedTo']) {
+    assert.deepEqual(backend.get('testCases', tc.id)[key], beforeEdit[key], key);
+  }
   await click('[aria-label="More actions"]');
   assert.equal(await evaluate(`[...document.querySelectorAll('[role=menuitem]')].some(b => b.textContent.includes('Move to trash'))`), false);
   await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}))`);
   step = 'Contributor creates own case';
   await go('#/cases/new');
   await fillCase({ title: 'Contributor-owned navigation test', moduleId: navigation.modules[0].id, steps: [['Open the synthetic page', 'The expected section is visible']] });
-  assert.deepEqual(await evaluate(`[...document.querySelectorAll('form [name]')].map(el => el.name)`),
-    ['title', 'moduleId', 'completionStatus', 'assignedTo']);
+  await assertSimpleCaseForm();
   await click('form .editor-actions button[type=submit]');
   await waitFor(`/^#\\/cases\\/[0-9a-f-]{36}$/.test(location.hash)`);
   const ownId = await evaluate(`location.hash.split('/')[2]`);
@@ -267,6 +317,7 @@ async function main() {
   step = 'Contributor edits own case';
   await go('#/cases/' + ownId + '/edit');
   await waitFor(`document.querySelector('input[name=title]')`);
+  await assertSimpleCaseForm();
   await setValue('input[name=title]', 'Contributor-owned navigation test updated');
   await click('form .editor-actions button[type=submit]');
   await waitFor(`location.hash === '#/cases/${ownId}' && document.querySelector('.steps-view')`);
