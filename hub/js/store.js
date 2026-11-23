@@ -267,8 +267,8 @@ export function createStore(persistence) {
   }
 
   async function importCases(rows) {
-    const me = requireActor('data.import');
-    const { cases, errors } = planCaseImport(data, rows);
+    const me = requireActor('case.edit');
+    const { cases, errors } = planCaseImport(data, rows, me);
     if (errors.length) throw new ValidationError({}, errors[0]);
     const counters = computeKeyCounters([...data.testCases, ...cases], data.deletedItems, meta.keyCounters);
     const now = nowIso();

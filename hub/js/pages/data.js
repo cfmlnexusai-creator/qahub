@@ -5,6 +5,7 @@ import { FIELD_LABELS } from '../schema.js';
 import { pageHead, card, banner, select, lookups, emptyState } from '../components/ui.js';
 import { confirmDialog } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
+import { isAdmin } from '../visibility.js';
 
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 
@@ -34,7 +35,7 @@ function caseImportCard(store, canImport) {
       if (file.size > 3 * 1024 * 1024) throw new Error('Split files larger than 3 MB into smaller batches.');
       const rows = parseCaseImport(await file.text(), extension);
       if (currentSelection !== selection) return;
-      const plan = planCaseImport(store.data, rows);
+      const plan = planCaseImport(store.data, rows, store.actor());
       if (plan.errors.length) {
         preview.replaceChildren(banner('danger', [
           h('strong', null, `${plural(plan.errors.length, 'problem')} in ${file.name}`),
@@ -77,13 +78,27 @@ function caseImportCard(store, canImport) {
         downloadFile('qahub-case-import.csv', `Title,Module ID,Objective,Steps,Expected result\r\n${['Example test case', module.id, '', '', ''].map(csvCell).join(',')}\r\n`, 'text/csv');
       },
     }, 'Download CSV template')),
-    canImport ? input : banner('warn', 'Ask an Admin to import test cases.'),
+    canImport ? input : banner('info', 'Your role can view and export cases. A user with case creation access can import them.'),
     preview) });
 }
 
 export function render({ store, root, setCrumbs, query }) {
   setCrumbs([{ label: 'Import / Export' }]);
   const look = lookups(store);
+  const caseImport = caseImportCard(store, store.can('case.edit'));
+  const exportCsv = () => {
+    const rows = store.activeCases().sort((a, b) => a.caseKey.localeCompare(b.caseKey, undefined, { numeric: true }));
+    downloadFile(`qa-hub-cases-${stamp()}.csv`, casesToCsv(rows, look), 'text/csv');
+    toast(`Exported ${plural(rows.length, 'case')} to CSV`);
+  };
+  if (!isAdmin(store)) {
+    root.append(pageHead({ title: 'Import / Export' }),
+      h('div', { class: 'grid grid-2', style: { alignItems: 'start' } }, caseImport, card({
+        title: 'Export visible cases',
+        body: h('button', { type: 'button', class: 'btn', onClick: exportCsv }, 'Export CSV'),
+      })));
+    return;
+  }
   const canImport = store.can('data.import');
 
   root.append(pageHead({ title: 'Import / Export', subtitle: 'Export JSON backups or import reviewed data into the shared team workspace. Imports affect everyone.' }));
@@ -101,13 +116,7 @@ export function render({ store, root, setCrumbs, query }) {
       banner('warn', 'Clearing browser data, using a private window, or switching browsers loses anything not exported.'),
       h('div', { class: 'row' },
         h('button', { type: 'button', class: 'btn btn-primary', onClick: () => downloadFullJson(store) }, icon('data', 16), 'Download full JSON'),
-        h('button', {
-          type: 'button', class: 'btn', onClick: () => {
-            const rows = store.activeCases().sort((a, b) => a.caseKey.localeCompare(b.caseKey, undefined, { numeric: true }));
-            downloadFile(`qa-hub-cases-${stamp()}.csv`, casesToCsv(rows, look), 'text/csv');
-            toast(`Exported ${plural(rows.length, 'case')} to CSV`);
-          },
-        }, 'Export CSV (all active cases)')),
+        h('button', { type: 'button', class: 'btn', onClick: exportCsv }, 'Export CSV (all active cases)')),
       h('div', { class: 'field' },
         h('span', { class: 'field-label' }, 'Per-module JSON (recommended for Git)'),
         h('div', { class: 'row', style: { flexWrap: 'nowrap' } }, modSel, h('button', {
@@ -227,5 +236,5 @@ export function render({ store, root, setCrumbs, query }) {
   });
 
   root.append(h('div', { class: 'grid grid-2', style: { alignItems: 'start' } }, h('div', { class: 'stack' }, exportCard, gitCard),
-    h('div', { class: 'stack' }, caseImportCard(store, canImport), importCard)));
+    h('div', { class: 'stack' }, caseImport, importCard)));
 }

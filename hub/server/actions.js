@@ -4,11 +4,11 @@ export const ACTIONS = new Set([
   'saveModule', 'saveFeature', 'setArchived', 'saveMember', 'saveLabel', 'deleteLabel', 'updateProject',
   'markExported', 'clearDemoData', 'applyImport', 'importCases', 'setModuleShared', 'claimCase',
 ]);
-const CONTRIBUTOR_ACTIONS = new Set(['createCase', 'updateCase', 'softDeleteCases', 'bulkUpdateCases', 'restoreCase', 'reviewCase', 'claimCase']);
+const CONTRIBUTOR_ACTIONS = new Set(['createCase', 'importCases', 'updateCase', 'softDeleteCases', 'bulkUpdateCases', 'restoreCase', 'reviewCase', 'claimCase']);
 export async function executeAction(store, action, args) {
   if (!ACTIONS.has(action) || !Array.isArray(args)) throw Object.assign(new Error('Unsupported action.'), { status: 400 });
   if (!isAdmin(store) && !CONTRIBUTOR_ACTIONS.has(action)) throw Object.assign(new Error('Administrator access required.'), { status: 403 });
-  if (!isAdmin(store) && !['createCase', 'claimCase'].includes(action)) {
+  if (!isAdmin(store) && !['createCase', 'importCases', 'claimCase'].includes(action)) {
     const ids = ['updateCase', 'restoreCase', 'reviewCase'].includes(action) ? [args[0]] : args[0];
     if (!Array.isArray(ids)) throw Object.assign(new Error('Case IDs are required.'), { status: 400 });
     const deleting = ['softDeleteCases', 'restoreCase'].includes(action);

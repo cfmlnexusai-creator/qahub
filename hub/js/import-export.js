@@ -122,7 +122,7 @@ export function parseCaseImport(text, format) {
   return Array.isArray(value) ? value : value?.testCases;
 }
 
-export function planCaseImport(collections, rows) {
+export function planCaseImport(collections, rows, actor) {
   if (!Array.isArray(rows) || !rows.length || rows.length > CASE_IMPORT_LIMIT) {
     return { cases: [], errors: [`Provide between 1 and ${CASE_IMPORT_LIMIT} test cases.`] };
   }
@@ -163,12 +163,16 @@ export function planCaseImport(collections, rows) {
       content.moduleId = module.id;
       if (content.featureId || row.feature) content.featureId = resolve(
         collections.features.filter(feature => feature.moduleId === module.id), content.featureId || row.feature, 'feature in this module').id;
-      if (content.assignedTo || row.assignee) content.assignedTo = resolve(
+      if (actor.role !== 'Admin') content.assignedTo = actor.id;
+      else if (content.assignedTo || row.assignee) content.assignedTo = resolve(
         collections.members.filter(member => member.active !== false), content.assignedTo || row.assignee, 'active assignee', 'displayName').id;
       content.suites = (content.suites || []).map(value => resolve(collections.testSuites, value, 'suite').id);
       content.accountIds = (content.accountIds || row.accounts || []).map(value => resolve(collections.accounts, value, 'account').id);
       const draft = normalizeCase({ ...content, caseKey: (content.caseKey || '').toUpperCase() });
       const problems = Object.values(validateCase(draft, ctx));
+      if (draft.status === 'Approved' && !['Admin', 'Maintainer'].includes(actor.role)) {
+        problems.push('Only Maintainers and Admins can mark a case Approved.');
+      }
       if (draft.caseKey && used.has(draft.caseKey)) problems.push(`${draft.caseKey} occurs more than once in this file.`);
       if (problems.length) throw new Error(problems.join(' '));
       if (draft.caseKey) used.add(draft.caseKey);

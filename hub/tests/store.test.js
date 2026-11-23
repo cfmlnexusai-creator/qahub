@@ -51,8 +51,15 @@ test('case imports append CSV and JSON atomically and require existing active mo
 
   await store.setArchived('modules', 'mod-authentication', true);
   await assert.rejects(executeAction(store, 'importCases', [rows]), /is archived/);
-  store.setActor(store.data.members.find(member => member.role === 'Contributor').id);
-  await assert.rejects(executeAction(store, 'importCases', [rows]), /Administrator access required/);
+  await store.setArchived('modules', 'mod-authentication', false);
+  const contributor = store.data.members.find(member => member.role === 'Contributor');
+  store.setActor(contributor.id);
+  await assert.rejects(executeAction(store, 'importCases', [[baseCase({ status: 'Approved' })]]), /can mark a case Approved/);
+  assert.deepEqual(await executeAction(store, 'importCases', [[baseCase({ assignedTo: 'mbr-dev-a' })]]), { added: 1 });
+  assert.equal(store.data.testCases.at(-1).assignedTo, contributor.id);
+  await assert.rejects(executeAction(store, 'applyImport', []), /Administrator access required/);
+  store.setActor(store.data.members.find(member => member.role === 'Viewer').id);
+  await assert.rejects(executeAction(store, 'importCases', [rows]), /cannot do this/);
 });
 
 test('seed creates 8 profiles, 10 modules and exactly 2 demo cases', async () => {
