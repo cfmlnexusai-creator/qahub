@@ -1,4 +1,4 @@
-import { cloudSession, cloudLogin, cloudSignOut, createCloudStore, emptyLoginStore } from './cloud.js';
+import { cloudSession, cloudLogin, cloudSignOut, createCloudStore, emptyLoginStore, recordAccessEvent } from './cloud.js';
 // Bootstrap: storage, store, app shell, profile gate, router, shortcuts, cross-tab sync.
 
 import { createIndexedDbPersistence, createMemoryPersistence } from './db.js';
@@ -458,7 +458,20 @@ async function boot() {
   window.addEventListener('focus', () => store.reload().catch(toastError));
 
   buildShell();
-  router = createRouter(ROUTES, (current) => renderPage(current));
+  const track = event => recordAccessEvent(event).catch(() => {});
+  let lastPage;
+  router = createRouter(ROUTES, (current) => {
+    renderPage(current);
+    if (current.path !== lastPage) {
+      track(lastPage === undefined ? 'open' : 'page');
+      lastPage = current.path;
+    }
+  });
+  const trackInteraction = event => {
+    if (event.isTrusted && !document.hidden) track('interaction');
+  };
+  document.addEventListener('click', trackInteraction, { capture: true });
+  document.addEventListener('change', trackInteraction, { capture: true });
 
   const saved = prefs.get('activeProfile');
   if (!credentials && saved && store.get('members', saved)?.active !== false) store.setActor(saved);

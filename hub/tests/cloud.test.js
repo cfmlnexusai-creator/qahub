@@ -57,10 +57,12 @@ test('server checks assignments, roles and authenticated activity actors', async
 });
 
 test('HTTP API authenticates, persists, rejects stale saves and compresses large data', async () => {
-  const { persistence, contributor, tc } = await fixture();
+  const { persistence, admin, contributor, tc } = await fixture();
   let snapshot = await persistence.load();
   let revision = 1;
   let commits = 0;
+  const access = [];
+  const user = { id: 'auth-user', email: 'contributor@example.test' };
   const originalFetch = globalThis.fetch;
   process.env.SUPABASE_URL = 'https://supabase.test';
   process.env.SUPABASE_ANON_KEY = 'test-anon';
@@ -68,8 +70,17 @@ test('HTTP API authenticates, persists, rejects stale saves and compresses large
   globalThis.fetch = async (url, options = {}) => {
     if (!String(url).startsWith('https://supabase.test')) return originalFetch(url, options);
     const path = new URL(url).pathname;
-    if (path === '/auth/v1/user') return Response.json({ id: 'auth-user' });
-    if (path === '/rest/v1/qa_identities') return Response.json([{ member_id: contributor.id }]);
+    if (path === '/auth/v1/token') return Response.json({ user, access_token: 'verified-token', expires_in: 3600 });
+    if (path === '/auth/v1/user') return Response.json(options.headers.Authorization === 'Bearer admin-token' ? { id: 'auth-admin' } : user);
+    if (path === '/rest/v1/qa_identities') return Response.json([{ member_id: String(url).includes('eq.auth-admin') ? admin.id : contributor.id }]);
+    if (path === '/rest/v1/rpc/qa_record_access') {
+      access.push(JSON.parse(options.body));
+      return new Response(null, { status: 204 });
+    }
+    if (path === '/rest/v1/rpc/qa_access_report') {
+      assert.deepEqual(JSON.parse(options.body), { p_member: contributor.id, p_before: null });
+      return Response.json({ logins: 1, activeDays: 1, days: [] });
+    }
     if (path === '/rest/v1/qa_workspace') {
       if (new URL(url).searchParams.get('select').includes('members:')) return Response.json([{ revision, members: snapshot.collections.members }]);
       return Response.json([{ snapshot, revision }]);
@@ -93,6 +104,9 @@ test('HTTP API authenticates, persists, rejects stale saves and compresses large
   try {
     assert.equal((await originalFetch(base + '/api/state')).status, 401);
     const headers = { Authorization: 'Bearer verified-token', 'Content-Type': 'application/json' };
+    const login = () => originalFetch(base + '/api/login', { method: 'POST', headers, body: JSON.stringify({ email: user.email, password: 'test' }) });
+    assert.equal((await login()).status, 200);
+    assert.deepEqual(access[0], { p_member: contributor.id, p_user: user.id, p_email: user.email, p_event: 'login' });
     const response = await originalFetch(base + '/api/state', { headers });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-encoding'), 'gzip');
@@ -100,6 +114,18 @@ test('HTTP API authenticates, persists, rejects stale saves and compresses large
     assert.equal(state.collections.testCases.length, 2);
     const unchanged = await originalFetch(base + '/api/state?revision=' + state.revision, { headers });
     assert.deepEqual(await unchanged.json(), { unchanged: true, revision });
+    assert.deepEqual(access.map(entry => entry.p_event), ['login'], 'Workspace polling adds no access events');
+    const track = event => originalFetch(base + '/api/access-event', { method: 'POST', headers, body: JSON.stringify({ event, member: admin.id }) });
+    assert.equal((await track('login')).status, 400);
+    for (const event of ['open', 'page', 'interaction']) assert.equal((await track(event)).status, 200);
+    assert.deepEqual(access.map(entry => entry.p_event), ['login', 'open', 'page', 'interaction']);
+    assert.ok(access.every(entry => entry.p_member === contributor.id));
+    const reportUrl = base + '/api/member-access?member=' + contributor.id;
+    assert.equal((await originalFetch(reportUrl)).status, 401);
+    assert.equal((await originalFetch(reportUrl, { headers })).status, 403);
+    const report = await originalFetch(reportUrl, { headers: { Authorization: 'Bearer admin-token' } });
+    assert.equal(report.status, 200);
+    assert.equal((await report.json()).logins, 1);
     const body = { revision: state.revision, action: 'bulkUpdateCases', args: [[tc.id], { completionStatus: 'Completed' }] };
     const saved = await originalFetch(base + '/api/action', { method: 'POST', headers, body: JSON.stringify(body) });
     assert.equal(saved.status, 200);
@@ -116,7 +142,11 @@ test('HTTP API authenticates, persists, rejects stale saves and compresses large
     assert.equal(commits, 2);
     const member = snapshot.collections.members.find(m => m.id === contributor.id);
     member.active = false;
+    const recorded = access.length;
+    assert.equal((await login()).status, 403);
+    assert.equal((await track('interaction')).status, 403);
     assert.equal((await originalFetch(base + '/api/state?revision=' + revision, { headers })).status, 403, 'Lightweight polls still check active membership');
+    assert.equal(access.length, recorded);
     const library = readFileSync(appPath('data/library.json'));
     assert.ok(library.length > 4_500_000);
     assert.ok(gzipSync(library).length < 4_500_000);

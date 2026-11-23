@@ -11,7 +11,7 @@ export function cloudSignOut() {
   sessionStorage.removeItem(SESSION);
   localStorage.removeItem(SESSION);
 }
-async function request(path, body) {
+async function request(path, body, { keepalive = false } = {}) {
   const session = cloudSession();
   let encoded = body ? JSON.stringify(body) : undefined;
   let compressed = false;
@@ -21,6 +21,7 @@ async function request(path, body) {
     compressed = true;
   }
   const response = await fetch('/api/' + path, {
+    keepalive,
     method: body ? 'POST' : 'GET', headers: { 'Content-Type': compressed ? 'application/octet-stream' : 'application/json',
       ...(compressed ? { 'Content-Encoding': 'gzip' } : {}),
       ...(session ? { Authorization: `Bearer ${session.token}` } : {}) },
@@ -38,6 +39,14 @@ export async function cloudLogin({ username, password, remember }) {
   cloudSignOut();
   const session = { token: result.access_token, expiresAt: Date.now() + Math.min(result.expires_in, 43200) * 1000 };
   (remember ? localStorage : sessionStorage).setItem(SESSION, JSON.stringify(session));
+}
+export function memberAccess(memberId, before) {
+  const params = new URLSearchParams({ member: memberId });
+  if (before) params.set('before', before);
+  return request(`member-access?${params}`);
+}
+export function recordAccessEvent(event) {
+  return request('access-event', { event }, { keepalive: true });
 }
 const MUTATIONS = new Set(['createCase', 'updateCase', 'softDeleteCases', 'restoreCase', 'purgeCase', 'reviewCase',
   'bulkUpdateCases', 'saveModule', 'saveFeature', 'setArchived', 'saveMember', 'saveLabel', 'deleteLabel',

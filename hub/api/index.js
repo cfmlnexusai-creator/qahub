@@ -4,6 +4,28 @@ import { createStagedPersistence } from '../server/workspace.js';
 import { createStore } from '../js/store.js';
 import { executeAction, visibleSnapshot } from '../server/actions.js';
 
+async function memberIdFor(user) {
+  const identities = await supabase(`/rest/v1/qa_identities?user_id=eq.${encodeURIComponent(user.id)}&select=member_id`);
+  if (!identities?.[0]) throw Object.assign(new Error('Your account is not linked to a QA Hub team member. Contact an Admin.'), { status: 403 });
+  return identities[0].member_id;
+}
+
+function activeMember(members, memberId) {
+  const member = members.find(m => m.id === memberId);
+  if (!member || member.active === false) throw Object.assign(new Error('Your team membership is inactive.'), { status: 403 });
+  return member;
+}
+
+async function recordAccess(memberId, user, event) {
+  try {
+    await supabase('/rest/v1/rpc/qa_record_access', {
+      method: 'POST', body: { p_member: memberId, p_user: user.id, p_email: user.email ?? '', p_event: event },
+    });
+  } catch (error) {
+    console.error('Could not record QA Hub access:', error.message);
+  }
+}
+
 async function readBody(req) {
   if (req.headers['content-encoding'] === 'gzip') {
     const chunks = [];
@@ -49,21 +71,44 @@ export default async function handler(req, res) {
       const { email, password } = await readBody(req);
       if (typeof email !== 'string' || typeof password !== 'string') return send(400, { error: 'Email and password are required.' });
       const session = await supabase('/auth/v1/token?grant_type=password', { method: 'POST', publicKey: true, body: { email, password } });
+      const memberId = await memberIdFor(session.user);
+      const { members } = await readWorkspace({ summary: true });
+      activeMember(members, memberId);
+      await recordAccess(memberId, session.user, 'login');
       return send(200, { access_token: session.access_token, expires_in: session.expires_in });
     }
-    if (!['/api/state', '/api/action'].includes(path)) return send(404, { error: 'Not found.' });
-    if ((path === '/api/state' && req.method !== 'GET') || (path === '/api/action' && req.method !== 'POST')) return send(405, { error: 'Method not allowed.' });
+    if (!['/api/state', '/api/action', '/api/member-access', '/api/access-event'].includes(path)) return send(404, { error: 'Not found.' });
+    const method = ['/api/action', '/api/access-event'].includes(path) ? 'POST' : 'GET';
+    if (req.method !== method) return send(405, { error: 'Method not allowed.' });
     const token = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
     if (!token) return send(401, { error: 'Sign in to continue.' });
     const user = await supabase('/auth/v1/user', { token, publicKey: true });
-    const identities = await supabase(`/rest/v1/qa_identities?user_id=eq.${encodeURIComponent(user.id)}&select=member_id`);
-    const memberId = identities?.[0]?.member_id;
-    if (!memberId) return send(403, { error: 'Your account is not linked to a QA Hub team member. Contact an Admin.' });
+    const memberId = await memberIdFor(user);
+    if (path === '/api/access-event') {
+      const { event } = await readBody(req);
+      if (!['open', 'page', 'interaction'].includes(event)) return send(400, { error: 'Invalid access event.' });
+      const { members } = await readWorkspace({ summary: true });
+      activeMember(members, memberId);
+      await recordAccess(memberId, user, event);
+      return send(200, { ok: true });
+    }
+    if (path === '/api/member-access') {
+      const { members } = await readWorkspace({ summary: true });
+      if (activeMember(members, memberId).role !== 'Admin') return send(403, { error: 'Administrator access is required.' });
+      const target = url.searchParams.get('member');
+      if (!members.some(m => m.id === target)) return send(404, { error: 'Team member not found.' });
+      const before = url.searchParams.get('before');
+      if (before !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(before) || !Number.isFinite(Date.parse(before)) || new Date(before).toISOString().slice(0, 10) !== before || before.startsWith('0000'))) {
+        return send(400, { error: 'Invalid history date.' });
+      }
+      const report = await supabase('/rest/v1/rpc/qa_access_report', { method: 'POST', body: { p_member: target, p_before: before } });
+      const days = report.days.slice(0, 30);
+      return send(200, { ...report, days, nextBefore: report.days.length > 30 ? days.at(-1).access_day : null });
+    }
     const knownRevision = url.searchParams.get('revision');
     if (path === '/api/state' && knownRevision !== null) {
       const summary = await readWorkspace({ summary: true });
-      const member = summary.members.find(m => m.id === memberId);
-      if (!member || member.active === false) return send(403, { error: 'Your team membership is inactive.' });
+      activeMember(summary.members, memberId);
       if (String(summary.revision) === knownRevision) return send(200, { unchanged: true, revision: summary.revision });
     }
     const { revision, snapshot } = await readWorkspace();

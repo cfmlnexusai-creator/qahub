@@ -40,6 +40,8 @@ These migrations preserve the existing document model and history in Postgres JS
 
 Background polling requests only the revision and membership information when nothing has changed. Saves wait for any active refresh and run in order; a background refresh cannot reject an Update with a busy message. Same-record version checks and shared-revision conflict detection remain enforced. Database regression checks in `supabase/tests/incremental_workspace.sql` run inside a rolled-back transaction.
 
+Apply migration 004 before deploying the member access report. Admins can open **Team → member actions → Access history** for per-account daily counts and member totals in India Standard Time. Successful QAHub sign-ins, site loads, in-app navigation, and clicks or input changes are tracked separately. Background polling and idle time generate no activity. Tracking begins with deployment and prior activity is unavailable in the report.
+
 ## 2. Configure and seed
 
 Use Node 22 or later. From `hub/`, copy `.env.example` to `.env` and set:

@@ -1,8 +1,9 @@
 import { h, icon } from '../utils.js';
 import { ROLES } from '../schema.js';
 import { pageHead, card, avatar, banner, plainChip, menu } from '../components/ui.js';
-import { formDialog } from '../components/modal.js';
+import { formDialog, openModal } from '../components/modal.js';
 import { toast, toastError } from '../components/toast.js';
+import { memberAccess } from '../cloud.js';
 
 const ROLE_HELP = {
   Admin: 'Everything, incl. team edits, permanent delete, reset',
@@ -10,6 +11,67 @@ const ROLE_HELP = {
   Contributor: 'Create cases; edit assigned cases; delete own cases',
   Viewer: 'Read-only',
 };
+
+const accessTime = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'medium',
+});
+const formatAccess = value => value ? accessTime.format(new Date(value)) : '—';
+
+function accessDialog(member) {
+  const status = h('p', { role: 'status' });
+  const summary = h('dl', { class: 'kv' });
+  const history = h('tbody');
+  const table = h('div', { class: 'table-wrap', hidden: true }, h('table', { class: 'table' },
+    h('thead', null, h('tr', null, ['Date', 'Account', 'Logins', 'Site opens', 'Page views', 'Interactions', 'Last interaction']
+      .map(label => h('th', { scope: 'col' }, label)))), history));
+  let before;
+  const more = h('button', { type: 'button', class: 'btn', hidden: true, onClick: () => load() }, 'Load older days');
+
+  async function load() {
+    more.disabled = true;
+    status.textContent = 'Loading access history…';
+    try {
+      const report = await memberAccess(member.id, before);
+      const totals = [
+        ['Successful logins', `${report.today.logins} today / ${report.logins} recorded`],
+        ['Site opens', `${report.today.opens} today / ${report.opens} recorded`],
+        ['Page views', `${report.today.pages} today / ${report.pages} recorded`],
+        ['Interactions', `${report.today.interactions} today / ${report.interactions} recorded`],
+        ['Days accessed', report.activeDays],
+        ['Last login', formatAccess(report.lastLogin)],
+        ['Last interaction', formatAccess(report.lastInteraction)],
+      ];
+      summary.replaceChildren(...totals.flatMap(([label, value]) => [h('dt', null, label), h('dd', null, String(value))]));
+      for (const day of report.days) {
+        for (const account of day.accounts) {
+          history.append(h('tr', null, [day.access_day, account.email || '—', account.logins,
+            account.opens, account.pages, account.interactions, formatAccess(account.lastInteraction)]
+            .map(value => h('td', null, String(value)))));
+        }
+      }
+      table.hidden = !history.rows.length;
+      status.textContent = history.rows.length ? '' : 'No activity has been recorded for this member.';
+      before = report.nextBefore;
+      more.hidden = !before;
+      more.textContent = 'Load older days';
+    } catch {
+      status.textContent = 'Could not load access history.';
+      more.hidden = false;
+      more.textContent = 'Retry';
+    } finally {
+      more.disabled = false;
+    }
+  }
+
+  return openModal({
+    title: `Access history for ${member.displayName}`,
+    description: 'India Standard Time. A site open loads or reloads QAHub. Page views include navigation. Interactions count clicks and input changes. Idle tabs add no activity. Totals start when tracking was enabled.',
+    body: h('div', { class: 'stack', style: { gap: '12px' } }, summary, status, table, more),
+    wide: true,
+    actions: [{ label: 'Close' }],
+    onReady: load,
+  });
+}
 
 function memberDialog(store, existing = null) {
   return formDialog({
@@ -68,11 +130,12 @@ export function render({ store, root, setCrumbs, profilePicker, authMode }) {
       h('td', { 'data-label': 'Created' }, String(created)),
       h('td', { 'data-label': 'Owns', class: 'small' }, owns.length ? owns.join(', ') : h('span', { class: 'muted' }, '—')),
       h('td', { class: 'col-actions' }, canEdit && menu(null, [
+        pw && me?.role === 'Admin' && { label: 'Access history', icon: 'activity', onClick: () => accessDialog(m) },
         { label: 'Edit', icon: 'edit', onClick: () => memberDialog(store, m) },
         m.active !== false
           ? { label: 'Deactivate', icon: 'archive', onClick: () => store.saveMember({ ...m, active: false }).then(() => toast(`${m.displayName} deactivated`)).catch(toastError) }
           : { label: 'Reactivate', icon: 'restore', onClick: () => store.saveMember({ ...m, active: true }).then(() => toast(`${m.displayName} reactivated`)).catch(toastError) },
-      ], { label: `Actions for ${m.displayName}` })));
+      ].filter(Boolean), { label: `Actions for ${m.displayName}` })));
   });
 
   root.append(card({
