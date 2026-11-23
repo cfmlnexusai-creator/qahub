@@ -1,4 +1,4 @@
-import { cloudSession, cloudLogin, cloudSignOut, createCloudStore, emptyLoginStore, recordAccessEvent } from './cloud.js';
+import { CLOUD_SESSION_KEY, cloudSession, cloudLogin, cloudSignOut, createCloudStore, emptyLoginStore, recordAccessEvent } from './cloud.js';
 // Bootstrap: storage, store, app shell, profile gate, router, shortcuts, cross-tab sync.
 
 import { createIndexedDbPersistence, createMemoryPersistence } from './db.js';
@@ -429,7 +429,13 @@ function showShortcuts() {
 
 // ---- boot -------------------------------------------------------------------------------
 async function boot() {
-  if (!cloudSession()) {
+  const session = cloudSession();
+  window.addEventListener('storage', event => {
+    if (event.storageArea === localStorage && (event.key === CLOUD_SESSION_KEY || event.key === null)) {
+      if (cloudSession()?.token !== session?.token) location.reload();
+    }
+  });
+  if (!session) {
     appEl.classList.add('login-mode');
     renderLogin(appEl, {
       store: await emptyLoginStore(), cloud: true, lockoutRemaining: () => 0,
@@ -441,6 +447,9 @@ async function boot() {
     });
     return;
   }
+  window.setTimeout(() => {
+    if (!cloudSession()) location.reload();
+  }, Math.max(0, session.expiresAt - Date.now()));
   try {
     store = await createCloudStore();
   } catch (error) {

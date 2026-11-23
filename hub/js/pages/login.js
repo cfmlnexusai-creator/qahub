@@ -55,7 +55,9 @@ export function renderLogin(root, { store, submit, lockoutRemaining, staleData =
       h('label', { for: 'login-pass' }, 'Password'),
       h('div', { class: 'login-input' }, icon('lock', 16), passIn, reveal),
       caps),
-    h('label', { class: 'login-remember', for: 'login-remember' }, remember, h('span', null, cloud ? 'Keep me signed in until this session expires' : 'Keep me signed in on this browser for 12 hours')),
+    cloud
+      ? h('p', { class: 'login-remember' }, 'Your session lasts 4 hours across tabs in this browser.')
+      : h('label', { class: 'login-remember', for: 'login-remember' }, remember, h('span', null, 'Keep me signed in on this browser for 12 hours')),
     error,
     submitBtn);
 

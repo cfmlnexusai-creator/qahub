@@ -1,15 +1,21 @@
 import { createStore } from './store.js';
 import { createMemoryPersistence } from './db.js';
-const SESSION = 'qa-hub-cloud-session';
+export const CLOUD_SESSION_KEY = 'qa-hub-cloud-session';
+const SESSION_SECONDS = 4 * 60 * 60;
 export function cloudSession() {
   try {
-    const session = JSON.parse(sessionStorage.getItem(SESSION) || localStorage.getItem(SESSION) || 'null');
-    return session?.expiresAt > Date.now() ? session : null;
+    const shared = localStorage.getItem(CLOUD_SESSION_KEY);
+    const legacy = sessionStorage.getItem(CLOUD_SESSION_KEY);
+    if (legacy) sessionStorage.removeItem(CLOUD_SESSION_KEY);
+    const session = JSON.parse(shared ?? legacy ?? 'null');
+    if (!session?.token || !(session.expiresAt > Date.now())) return null;
+    if (!shared && legacy) localStorage.setItem(CLOUD_SESSION_KEY, legacy);
+    return session;
   } catch { return null; }
 }
 export function cloudSignOut() {
-  sessionStorage.removeItem(SESSION);
-  localStorage.removeItem(SESSION);
+  sessionStorage.removeItem(CLOUD_SESSION_KEY);
+  localStorage.removeItem(CLOUD_SESSION_KEY);
 }
 async function request(path, body, { keepalive = false } = {}) {
   const session = cloudSession();
@@ -29,16 +35,19 @@ async function request(path, body, { keepalive = false } = {}) {
   });
   const value = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && path !== 'login') { cloudSignOut(); location.reload(); }
+    if (response.status === 401 && path !== 'login' && cloudSession()?.token === session?.token) {
+      cloudSignOut();
+      location.reload();
+    }
     throw Object.assign(new Error(value.error || 'Request failed.'), { errors: value.errors, status: response.status });
   }
   return value;
 }
-export async function cloudLogin({ username, password, remember }) {
+export async function cloudLogin({ username, password }) {
   const result = await request('login', { email: username.trim(), password });
-  cloudSignOut();
-  const session = { token: result.access_token, expiresAt: Date.now() + Math.min(result.expires_in, 43200) * 1000 };
-  (remember ? localStorage : sessionStorage).setItem(SESSION, JSON.stringify(session));
+  const session = { token: result.access_token, expiresAt: Date.now() + Math.min(result.expires_in, SESSION_SECONDS) * 1000 };
+  sessionStorage.removeItem(CLOUD_SESSION_KEY);
+  localStorage.setItem(CLOUD_SESSION_KEY, JSON.stringify(session));
 }
 export function memberAccess(memberId, before) {
   const params = new URLSearchParams({ member: memberId });

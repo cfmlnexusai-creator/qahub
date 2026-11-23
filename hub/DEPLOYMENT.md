@@ -84,7 +84,7 @@ npm run build
 npm start
 ```
 
-Open `http://127.0.0.1:5173/` and sign in with a linked email and Supabase password. Sessions expire with the access token (typically one hour), then require sign-in again. Remember-me stores the session until token expiry, capped at 12 hours. Sign-out clears this browser session. Unsaved drafts are held in memory and lost on refresh; saved changes remain in Supabase.
+Open `http://127.0.0.1:5173/` and sign in with a linked email and Supabase password. Set the Supabase Auth JWT expiry to 14,400 seconds for four-hour QAHub sessions. Tabs on the same origin share the session and sign-out. Unsaved drafts are held in memory and lost on refresh; saved changes remain in Supabase.
 
 Tests use no real credentials. Browser smoke tests use the full 3,815-case library and a mocked cloud API backed by the real store. HTTP API tests cover authentication requirements, permissions, persistence, conflicts and compression. Live Supabase/Vercel integration still requires verification after configuration.
 
