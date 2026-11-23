@@ -1,8 +1,8 @@
 // Pure import/export helpers: build export documents, CSV, and merge plans.
 
-import { SCHEMA_VERSION, COLLECTIONS, ENTITY_TYPE, idOf, normalizeCase } from './schema.js';
+import { SCHEMA_VERSION, COLLECTIONS, ENTITY_TYPE, CASE_CONTENT_FIELDS, idOf, normalizeCase } from './schema.js';
 import { isEqual, csvCell, clone, nowIso } from './utils.js';
-import { validateDocument } from './validation.js';
+import { validateCase, validateDocument } from './validation.js';
 
 /** Build a portable JSON document. With `moduleId`, only that module's slice is exported. */
 export function buildExport(collections, meta, { moduleId = null } = {}) {
@@ -69,6 +69,115 @@ export function parseJson(text) {
   } catch (e) {
     return { error: `File is not valid JSON: ${e.message}` };
   }
+}
+
+const CASE_IMPORT_LIMIT = 1000;
+const LIST_FIELDS = ['tags', 'bugRefs', 'suites', 'accountIds'];
+const heading = value => value.trim().toLowerCase().replace(/[ _-]/g, '');
+const csvFields = new Map([...CSV_COLUMNS.flatMap(([key, label]) => [[heading(key), key], [heading(label), key]]),
+  ...CASE_CONTENT_FIELDS.map(key => [heading(key), key])]);
+
+function csvCaseRows(text) {
+  const rows = [];
+  let row = [];
+  const cell = /(?:"((?:[^"]|"")*)"|([^",\r\n]*))(,|\r\n|\r|\n|$)/y;
+  while (cell.lastIndex < text.length) {
+    const match = cell.exec(text);
+    if (!match) throw new Error(`Invalid CSV quoting in record ${rows.length + 1}.`);
+    row.push(match[1] === undefined ? match[2] : match[1].replace(/""/g, '"'));
+    if (match[3] === ',') {
+      if (cell.lastIndex < text.length) continue;
+      row.push('');
+    }
+    if (row.some(value => value.trim())) rows.push(row);
+    row = [];
+  }
+  const headers = rows.shift() || [];
+  const fields = headers.map(value => csvFields.get(heading(value)));
+  const known = fields.filter(Boolean);
+  if (!known.includes('title') || !known.some(key => key === 'module' || key === 'moduleId')) {
+    throw new Error('CSV needs Title and Module (or Module ID) headers.');
+  }
+  if (new Set(known).size !== known.length) throw new Error('CSV contains duplicate column headings.');
+  return rows.map((values, i) => {
+    if (values.length !== headers.length) throw new Error(`CSV record ${i + 2} has the wrong number of columns.`);
+    return Object.fromEntries(fields.flatMap((key, column) => {
+      const value = values[column].trim();
+      if (!key || !value) return [];
+      if (key === 'steps') {
+        return [[key, value.split(/\r\n|\r|\n/).filter(line => line.trim()).map(line => {
+          const [action, ...expected] = line.replace(/^\s*\d+\.\s+/, '').split(' => ');
+          return { action: action.trim(), expected: expected.join(' => ').trim() };
+        })]];
+      }
+      if ([...LIST_FIELDS, 'accounts'].includes(key)) return [[key, value.split(';').map(item => item.trim()).filter(Boolean)]];
+      return [[key, value]];
+    }));
+  });
+}
+
+export function parseCaseImport(text, format) {
+  const source = text.replace(/^\uFEFF/, '');
+  const value = format === 'csv' ? csvCaseRows(source) : JSON.parse(source);
+  return Array.isArray(value) ? value : value?.testCases;
+}
+
+export function planCaseImport(collections, rows) {
+  if (!Array.isArray(rows) || !rows.length || rows.length > CASE_IMPORT_LIMIT) {
+    return { cases: [], errors: [`Provide between 1 and ${CASE_IMPORT_LIMIT} test cases.`] };
+  }
+  const cases = [];
+  const errors = [];
+  const used = new Set();
+  const ctx = { ...collections, reservedKeys: new Set(collections.deletedItems.map(item => item.caseKey)) };
+  function resolve(records, value, label, name = 'name') {
+    if (typeof value !== 'string' || !value.trim()) throw new Error(`Choose an existing ${label}.`);
+    const ref = value.trim();
+    const found = records.find(record => record.id === ref)
+      || records.find(record => record[name]?.toLowerCase() === ref.toLowerCase());
+    if (!found) throw new Error(`Unknown ${label}: ${ref}.`);
+    return found;
+  }
+
+  rows.forEach((row, index) => {
+    try {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('Expected a test case object.');
+      const content = {};
+      for (const key of [...CASE_CONTENT_FIELDS, 'caseKey']) {
+        const value = row[key];
+        if (value == null) continue;
+        if (key === 'steps') {
+          if (!Array.isArray(value) || value.some(step => !step || typeof step.action !== 'string'
+            || (step.expected != null && typeof step.expected !== 'string'))) throw new Error('Steps must contain action and optional expected text.');
+          content.steps = value.map(step => ({ action: step.action.trim(), expected: (step.expected || '').trim() }));
+        } else if (LIST_FIELDS.includes(key)) {
+          if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) throw new Error(`${key} must be a list of text values.`);
+          content[key] = [...new Set(value.map(item => item.trim()).filter(Boolean))];
+        } else {
+          if (typeof value !== 'string') throw new Error(`${key} must be text.`);
+          if (value.trim()) content[key] = value.trim();
+        }
+      }
+      const module = resolve(collections.modules, content.moduleId || row.module, 'module');
+      if (module.archived) throw new Error(`Module “${module.name}” is archived.`);
+      content.moduleId = module.id;
+      if (content.featureId || row.feature) content.featureId = resolve(
+        collections.features.filter(feature => feature.moduleId === module.id), content.featureId || row.feature, 'feature in this module').id;
+      if (content.assignedTo || row.assignee) content.assignedTo = resolve(
+        collections.members.filter(member => member.active !== false), content.assignedTo || row.assignee, 'active assignee', 'displayName').id;
+      content.suites = (content.suites || []).map(value => resolve(collections.testSuites, value, 'suite').id);
+      content.accountIds = (content.accountIds || row.accounts || []).map(value => resolve(collections.accounts, value, 'account').id);
+      const draft = normalizeCase({ ...content, caseKey: (content.caseKey || '').toUpperCase() });
+      const problems = Object.values(validateCase(draft, ctx));
+      if (draft.caseKey && used.has(draft.caseKey)) problems.push(`${draft.caseKey} occurs more than once in this file.`);
+      if (problems.length) throw new Error(problems.join(' '));
+      if (draft.caseKey) used.add(draft.caseKey);
+      cases.push(draft);
+    } catch (error) {
+      errors.push(`Case ${index + 1}: ${error.message}`);
+    }
+  });
+  return { cases, errors };
 }
 
 const versionOf = (r) => (Number.isInteger(r?.version) ? r.version : 0);

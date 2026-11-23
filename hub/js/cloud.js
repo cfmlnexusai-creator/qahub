@@ -50,7 +50,7 @@ export function recordAccessEvent(event) {
 }
 const MUTATIONS = new Set(['createCase', 'updateCase', 'softDeleteCases', 'restoreCase', 'purgeCase', 'reviewCase',
   'bulkUpdateCases', 'saveModule', 'saveFeature', 'setArchived', 'saveMember', 'saveLabel', 'deleteLabel',
-  'updateProject', 'markExported', 'clearDemoData', 'applyImport', 'setModuleShared', 'claimCase']);
+  'updateProject', 'markExported', 'clearDemoData', 'applyImport', 'importCases', 'setModuleShared', 'claimCase']);
 export async function createCloudStore() {
   let snapshot = await request('state');
   const drafts = new Map();

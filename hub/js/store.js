@@ -8,7 +8,7 @@ import { uuid, nowIso, clone, isEqual } from './utils.js';
 import { makeEvent, diffFields } from './activity.js';
 import { validateCase, validateModule, validateFeature, validateMember, validateNamedLabel } from './validation.js';
 import { buildSeedDocument } from './seed.js';
-import { buildExport, computeKeyCounters } from './import-export.js';
+import { buildExport, computeKeyCounters, planCaseImport } from './import-export.js';
 
 export class ValidationError extends Error {
   constructor(errors, message = 'Please fix the highlighted fields.') {
@@ -242,6 +242,18 @@ export function createStore(persistence) {
     const errors = validateCase(draft, caseCtx());
     if (Object.keys(errors).length) throw new ValidationError(errors);
     if (!draft.caseKey) draft.caseKey = nextCaseKey(draft.moduleId);
+    const record = newCaseRecord(draft, me, now);
+    const src = duplicatedFrom ? get('testCases', duplicatedFrom) : null;
+    const event = makeEvent({
+      entityType: 'testCase', entityId: record.id, entityLabel: record.caseKey, moduleId: record.moduleId,
+      action: src ? 'duplicate' : 'create', actorId: me.id,
+      note: src ? `Duplicated from ${src.caseKey}` : '',
+    });
+    await commit({ put: { testCases: [record] }, events: [event], metaPatch: counterPatchFor(record.caseKey) }, { entity: 'testCase', id: record.id });
+    return record;
+  }
+
+  function newCaseRecord(draft, me, now) {
     const record = {
       ...draft,
       version: 1,
@@ -251,14 +263,32 @@ export function createStore(persistence) {
       deletedAt: null, deletedBy: null, deletionReason: '',
     };
     delete record.demo;
-    const src = duplicatedFrom ? get('testCases', duplicatedFrom) : null;
-    const event = makeEvent({
-      entityType: 'testCase', entityId: record.id, entityLabel: record.caseKey, moduleId: record.moduleId,
-      action: src ? 'duplicate' : 'create', actorId: me.id,
-      note: src ? `Duplicated from ${src.caseKey}` : '',
-    });
-    await commit({ put: { testCases: [record] }, events: [event], metaPatch: counterPatchFor(record.caseKey) }, { entity: 'testCase', id: record.id });
     return record;
+  }
+
+  async function importCases(rows) {
+    const me = requireActor('data.import');
+    const { cases, errors } = planCaseImport(data, rows);
+    if (errors.length) throw new ValidationError({}, errors[0]);
+    const counters = computeKeyCounters([...data.testCases, ...cases], data.deletedItems, meta.keyCounters);
+    const now = nowIso();
+    const records = cases.map(draft => {
+      let caseKey = draft.caseKey;
+      if (!caseKey) {
+        const { keyPrefix } = get('modules', draft.moduleId);
+        const next = (counters[keyPrefix] || 0) + 1;
+        if (next > 999999) throw new ValidationError({}, `No case keys remain for ${keyPrefix}.`);
+        counters[keyPrefix] = next;
+        caseKey = `${keyPrefix}-${String(next).padStart(3, '0')}`;
+      }
+      return newCaseRecord({ ...draft, id: uuid(), caseKey }, me, now);
+    });
+    const events = records.map(record => makeEvent({
+      entityType: 'testCase', entityId: record.id, entityLabel: record.caseKey, moduleId: record.moduleId,
+      action: 'import', actorId: me.id,
+    }));
+    await commit({ put: { testCases: records }, events, metaPatch: { keyCounters: counters } }, { entity: 'import' });
+    return { added: records.length };
   }
 
   async function updateCase(id, input, { expectedVersion } = {}) {
@@ -762,7 +792,7 @@ export function createStore(persistence) {
     saveMember, logProfileSwitch,
     saveLabel, deleteLabel, labelUsage,
     updateProject, exportDocument, markExported, hasUnexportedChanges, clearDemoData, resetAll,
-    applyImport, drafts,
+    applyImport, importCases, drafts,
   };
 }
 

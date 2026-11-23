@@ -2,7 +2,7 @@ import { assignedStore, isAdmin } from '../js/visibility.js';
 export const ACTIONS = new Set([
   'createCase', 'updateCase', 'softDeleteCases', 'restoreCase', 'purgeCase', 'reviewCase', 'bulkUpdateCases',
   'saveModule', 'saveFeature', 'setArchived', 'saveMember', 'saveLabel', 'deleteLabel', 'updateProject',
-  'markExported', 'clearDemoData', 'applyImport', 'setModuleShared', 'claimCase',
+  'markExported', 'clearDemoData', 'applyImport', 'importCases', 'setModuleShared', 'claimCase',
 ]);
 const CONTRIBUTOR_ACTIONS = new Set(['createCase', 'updateCase', 'softDeleteCases', 'bulkUpdateCases', 'restoreCase', 'reviewCase', 'claimCase']);
 export async function executeAction(store, action, args) {

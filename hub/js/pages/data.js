@@ -1,5 +1,5 @@
-import { h, icon, fmtDate, fmtRelative, downloadFile, plural, slug } from '../utils.js';
-import { buildExport, casesToCsv, parseJson, planImport, KIND_LABEL } from '../import-export.js';
+import { h, icon, fmtDate, fmtRelative, downloadFile, plural, slug, csvCell } from '../utils.js';
+import { buildExport, casesToCsv, parseJson, planImport, parseCaseImport, planCaseImport, KIND_LABEL } from '../import-export.js';
 import { diffFields } from '../activity.js';
 import { FIELD_LABELS } from '../schema.js';
 import { pageHead, card, banner, select, lookups, emptyState } from '../components/ui.js';
@@ -13,6 +13,72 @@ export function downloadFullJson(store, { silent = false } = {}) {
   downloadFile(`qa-hub-${slug(store.meta.project.name)}-${stamp()}.json`, `${JSON.stringify(doc, null, 2)}\n`);
   store.markExported(true).catch(toastError);
   if (!silent) toast(`Exported ${plural(doc.testCases.length, 'case')} and ${plural(doc.activity.length, 'history event')}`);
+}
+
+function caseImportCard(store, canImport) {
+  const preview = h('div', { class: 'stack', 'aria-live': 'polite' });
+  const modules = store.data.modules.filter(module => !module.archived);
+  const modulePicker = select(modules.map(module => ({ value: module.id, label: module.name })), modules[0]?.id,
+    { 'aria-label': 'Module for the import template' });
+  const input = h('input', { type: 'file', accept: '.csv,.json,text/csv,application/json', 'aria-label': 'Test case import file', disabled: !canImport });
+  let selection = 0;
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = '';
+    const currentSelection = ++selection;
+    preview.replaceChildren();
+    try {
+      const extension = file.name.split('.').at(-1).toLowerCase();
+      if (!['csv', 'json'].includes(extension)) throw new Error('Choose a CSV or JSON file.');
+      if (file.size > 3 * 1024 * 1024) throw new Error('Split files larger than 3 MB into smaller batches.');
+      const rows = parseCaseImport(await file.text(), extension);
+      if (currentSelection !== selection) return;
+      const plan = planCaseImport(store.data, rows);
+      if (plan.errors.length) {
+        preview.replaceChildren(banner('danger', [
+          h('strong', null, `${plural(plan.errors.length, 'problem')} in ${file.name}`),
+          h('ul', null, plan.errors.slice(0, 20).map(error => h('li', null, error))),
+          plan.errors.length > 20 && h('p', null, 'Showing the first 20 problems.'),
+        ]));
+        return;
+      }
+      const apply = h('button', { type: 'button', class: 'btn btn-primary', onClick: async () => {
+        apply.disabled = true;
+        input.disabled = true;
+        try {
+          const result = await store.importCases(rows);
+          preview.replaceChildren();
+          toast(`Added ${plural(result.added, 'test case')}.`);
+        } catch (error) {
+          toastError(error);
+        } finally {
+          apply.disabled = false;
+          input.disabled = false;
+        }
+      } }, `Add ${plural(plan.cases.length, 'test case')}`);
+      preview.replaceChildren(h('strong', null, file.name),
+        h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
+          h('thead', null, h('tr', null, ['Title', 'Module'].map(label => h('th', { scope: 'col' }, label)))),
+          h('tbody', null, plan.cases.slice(0, 20).map(tc => h('tr', null,
+            h('td', null, tc.title), h('td', null, store.get('modules', tc.moduleId).name)))))),
+        plan.cases.length > 20 ? h('p', { class: 'muted small' }, 'Showing the first 20 cases.') : null,
+        apply);
+    } catch (error) {
+      if (currentSelection === selection) preview.replaceChildren(banner('danger', error.message));
+    }
+  });
+  return card({ title: 'Add test cases from CSV or JSON', body: h('div', { class: 'stack' },
+    h('p', null, 'Use an existing, unarchived module name or ID for each case. Leave case keys blank to generate them.'),
+    h('p', { class: 'hint' }, 'CSV requires Title and Module (or Module ID). JSON accepts an array or a testCases array with title and module or moduleId.'),
+    modules.length > 0 && h('div', { class: 'row' }, modulePicker, h('button', {
+      type: 'button', class: 'btn', onClick: () => {
+        const module = store.get('modules', modulePicker.value);
+        downloadFile('qahub-case-import.csv', `Title,Module ID,Objective,Steps,Expected result\r\n${['Example test case', module.id, '', '', ''].map(csvCell).join(',')}\r\n`, 'text/csv');
+      },
+    }, 'Download CSV template')),
+    canImport ? input : banner('warn', 'Ask an Admin to import test cases.'),
+    preview) });
 }
 
 export function render({ store, root, setCrumbs, query }) {
@@ -150,7 +216,7 @@ export function render({ store, root, setCrumbs, query }) {
     preview.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
-  const importCard = card({ title: 'Import', body: h('div', { class: 'stack' }, fileInput, drop, preview) });
+  const importCard = card({ title: 'Import QAHub backup', body: h('div', { class: 'stack' }, fileInput, drop, preview) });
 
   const gitCard = card({
     title: 'Shared team workflow',
@@ -160,5 +226,6 @@ export function render({ store, root, setCrumbs, query }) {
       banner('warn', 'Use synthetic test data only. Keep credentials and patient data out of cases and exports.')),
   });
 
-  root.append(h('div', { class: 'grid grid-2', style: { alignItems: 'start' } }, h('div', { class: 'stack' }, exportCard, gitCard), importCard));
+  root.append(h('div', { class: 'grid grid-2', style: { alignItems: 'start' } }, h('div', { class: 'stack' }, exportCard, gitCard),
+    h('div', { class: 'stack' }, caseImportCard(store, canImport), importCard)));
 }

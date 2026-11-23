@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore, ValidationError, ConflictError, PermissionError } from '../js/store.js';
 import { createMemoryPersistence } from '../js/db.js';
-import { planImport } from '../js/import-export.js';
+import { parseCaseImport, planImport } from '../js/import-export.js';
+import { executeAction } from '../server/actions.js';
 
 async function freshStore(persistence = createMemoryPersistence()) {
   const store = createStore(persistence);
@@ -23,6 +24,35 @@ const baseCase = (over = {}) => ({
   testLevel: 'E2E',
   steps: [{ action: 'Enter wrong password', expected: 'Error shown' }],
   ...over,
+});
+
+test('case imports append CSV and JSON atomically and require existing active modules', async () => {
+  const { store, persistence } = await freshStore();
+  const rows = parseCaseImport('\uFEFFTitle,Module,Steps\r\n"Check, ""quoted"" text",Authentication,"1. Submit => Error\r\n2. Retry"\r\n', 'csv');
+  const startingCount = store.activeCases().length;
+  await assert.rejects(executeAction(store, 'importCases', [[...rows, {
+    title: 'Unknown module case', module: 'Missing module',
+  }]]), /Case 2: Unknown module/);
+  assert.equal(store.activeCases().length, startingCount);
+  assert.equal((await persistence.load()).collections.testCases.length, startingCount);
+  assert.deepEqual(await executeAction(store, 'importCases', [rows]), { added: 1 });
+  const csvCase = store.activeCases().find(tc => tc.title === 'Check, "quoted" text');
+  assert.equal(csvCase.moduleId, 'mod-authentication');
+  assert.deepEqual(csvCase.steps, [{ action: 'Submit', expected: 'Error' }, { action: 'Retry', expected: '' }]);
+
+  const json = parseCaseImport(JSON.stringify({ testCases: [
+    baseCase({ caseKey: 'AUTH-009', createdBy: 'forged' }), baseCase(),
+  ] }), 'json');
+  assert.deepEqual(await executeAction(store, 'importCases', [json]), { added: 2 });
+  assert.equal(store.get('testCases', store.activeCases().find(tc => tc.caseKey === 'AUTH-009').id).createdBy, store.actor().id);
+  assert.ok(store.activeCases().some(tc => tc.caseKey === 'AUTH-010'));
+  await assert.rejects(executeAction(store, 'importCases', [json]), /already used/);
+  assert.throws(() => parseCaseImport('Title,Module\n"Unclosed,Authentication', 'csv'), /Invalid CSV quoting/);
+
+  await store.setArchived('modules', 'mod-authentication', true);
+  await assert.rejects(executeAction(store, 'importCases', [rows]), /is archived/);
+  store.setActor(store.data.members.find(member => member.role === 'Contributor').id);
+  await assert.rejects(executeAction(store, 'importCases', [rows]), /Administrator access required/);
 });
 
 test('seed creates 8 profiles, 10 modules and exactly 2 demo cases', async () => {
